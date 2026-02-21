@@ -21,7 +21,9 @@ revo-lib = { git = "https://github.com/revoproject/revo-lib" }
 ```
 
 ## 🧩 Binds
-[Open Gist (functions, structs, unions)](https://gist.github.com/Klubuntu/5edcfb1ce85600e4539ece41e8a37f8e)
+- [Open Gist (functions, structs, unions)](https://gist.github.com/Klubuntu/5edcfb1ce85600e4539ece41e8a37f8e)
+
+- [Download from gist (functions, structs, unions)](https://gist.github.com/Klubuntu/5edcfb1ce85600e4539ece41e8a37f8e/archive/62a304243092cd61ebd7a6a0d213d07733a28a56.zip)
 
 ## Additional scripts
 - [cleanup.sh](cleanup.sh) - clean up all built files
