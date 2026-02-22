@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-const OBS_COMMIT: &str = "0df94d5cae321b4410e889fb2b251565a1daf9b1";
+const OBS_COMMIT: &str = "32.1.0-rc1";
 
 fn run(cmd: &mut Command, step: &str) -> Result<(), Box<dyn Error>> {
     let status = cmd.status()?;
@@ -81,8 +81,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "git submodule update",
     )?;
 
-    // 2) Follow requested headless build flow:
-    // rm -rf build-headless && mkdir build-headless
+    // 2) rm -rf build-headless && mkdir build-headless
     if build_dir.exists() {
         fs::remove_dir_all(&build_dir)?;
     }
