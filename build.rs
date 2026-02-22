@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-const OBS_COMMIT: &str = "32.1.0-rc1";
+const DEFAULT_OBS_REF: &str = "32.1.0-rc1";
 
 fn run(cmd: &mut Command, step: &str) -> Result<(), Box<dyn Error>> {
     let status = cmd.status()?;
@@ -22,6 +22,7 @@ fn nproc() -> String {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+    let obs_ref = env::var("REVO_OBS_REF").unwrap_or_else(|_| DEFAULT_OBS_REF.to_string());
 
     let obs_root = manifest_dir.join("obs-libobs");
     let obs_src = obs_root.join("obs-studio");
@@ -47,7 +48,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .arg(&obs_src)
             .arg("fetch")
             .arg("origin")
-            .arg(OBS_COMMIT),
+            .arg(&obs_ref),
         "git fetch pinned commit",
     )?;
     run(
@@ -56,9 +57,29 @@ fn main() -> Result<(), Box<dyn Error>> {
             .arg(&obs_src)
             .arg("checkout")
             .arg("--force")
-            .arg(OBS_COMMIT),
+            .arg(&obs_ref),
         "git checkout pinned commit",
     )?;
+
+    let obs_describe = Command::new("git")
+        .arg("-C")
+        .arg(&obs_src)
+        .arg("describe")
+        .arg("--tags")
+        .arg("--always")
+        .output()
+        .ok()
+        .and_then(|out| {
+            if out.status.success() {
+                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| obs_ref.clone());
+    println!("cargo:rustc-env=REVO_LIBOBS_GIT_DESCRIBE={obs_describe}");
+    println!("cargo:warning=Revo-lib pinned OBS ref: {obs_describe}");
 
     // Ensure submodules match pinned commit.
     run(

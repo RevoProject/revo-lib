@@ -6,6 +6,10 @@ use crate::obs;
 
 static OBS_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
+pub fn libobs_git_describe() -> &'static str {
+    option_env!("REVO_LIBOBS_GIT_DESCRIBE").unwrap_or("unknown")
+}
+
 pub fn init(locale: &str, module_config_path: Option<&str>) -> RevoLibResult<()> {
     if OBS_INITIALIZED.load(Ordering::SeqCst) {
         return Ok(());
