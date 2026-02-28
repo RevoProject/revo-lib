@@ -156,7 +156,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             .arg("-DENABLE_PIPEWIRE=OFF");
         let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
         cmake.arg(format!("-DCMAKE_OSX_ARCHITECTURES={}", arch));
+    } else {
+        // Linux-specific flags
+        cmake
+            .arg("-DENABLE_PIPEWIRE=ON")
+            .arg("-DENABLE_WAYLAND=ON")
+            .arg("-DENABLE_X11=ON");
     }
+
+    // THIS LINE MUST EXIST HERE
+    run(cmake.current_dir(&build_dir), "cmake configure")?;
 
 
     // 4) Build
