@@ -151,15 +151,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         // --- Install required dependencies via Homebrew ---
         println!("cargo:warning=Step: install deps via brew");
-        run(
-            Command::new("brew")
+        for pkg in &["simde", "ffmpeg", "mbedtls", "speexdsp"] {
+            println!("cargo:warning=brew install {pkg}");
+            let status = Command::new("brew")
                 .arg("install")
-                .arg("simde")
-                .arg("ffmpeg")
-                .arg("mbedtls")
-                .arg("libdatachannel"),
-            "brew install deps",
-        )?;
+                .arg(pkg)
+                .status()?;
+            if !status.success() {
+                println!("cargo:warning=brew install {pkg} failed or already installed, continuing");
+            }
+        }
     
         // --- Patch buildspec.cmake to skip dep downloads (no network) ---
         println!("cargo:warning=Step: patch buildspec.cmake to skip downloads");
