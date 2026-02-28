@@ -153,6 +153,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             .arg("-G").arg("Xcode")
             .arg("-DCMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD=c++17")
             .arg("-DCMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LIBRARY=libc++")
+            .arg("-DENABLE_SCRIPTING=OFF")
+            .arg("-DENABLE_VIRTUALCAM=OFF")
             .arg("-DENABLE_PIPEWIRE=OFF");
         let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
         cmake.arg(format!("-DCMAKE_OSX_ARCHITECTURES={}", arch));
