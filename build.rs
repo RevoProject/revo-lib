@@ -128,18 +128,25 @@ fn main() -> Result<(), Box<dyn Error>> {
     // --- PLATFORM-SPECIFIC FLAGS ---
     
     if cfg!(target_os = "macos") {
-        let metal_cmake_candidates = [
-            obs_src.join("libobs-metal/CMakeLists.txt"),
-            obs_src.join("libobs/CMakeLists.txt"),
-        ];
-        for metal_cmake in &metal_cmake_candidates {
-            if metal_cmake.exists() {
-                let content = fs::read_to_string(metal_cmake)?;
+        // Search entire obs-studio tree for the file that defines libobs-metal
+        println!("cargo:warning=Searching for libobs-metal definition...");
+        let mut patched_any = false;
+        for entry in walkdir::WalkDir::new(&obs_src)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name() == "CMakeLists.txt")
+        {
+            if let Ok(content) = fs::read_to_string(entry.path()) {
                 if content.contains("libobs-metal") && !content.contains("LINKER_LANGUAGE") {
+                    println!("cargo:warning=Patching: {}", entry.path().display());
                     let patched = content + "\nset_target_properties(libobs-metal PROPERTIES LINKER_LANGUAGE CXX)\n";
-                    fs::write(metal_cmake, patched)?;
+                    fs::write(entry.path(), patched)?;
+                    patched_any = true;
                 }
             }
+        }
+        if !patched_any {
+            println!("cargo:warning=No libobs-metal target found to patch (may already be patched or not present)");
         }
     
         cmake
