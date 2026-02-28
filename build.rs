@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-const DEFAULT_OBS_REF: &str = "32.1.0-rc1";
+const DEFAULT_OBS_REF: &str = "32.0.0";
 
 fn run(cmd: &mut Command, step: &str) -> Result<(), Box<dyn Error>> {
     let status = cmd.status()?;
@@ -123,6 +123,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             .arg("-DENABLE_VST=OFF")
             .arg("-DENABLE_PIPEWIRE=ON")
             .arg("-DENABLE_NEW_MPEGTS_OUTPUT=OFF")
+
+            // ★ FIX: wyłączamy renderery, które psują build headless
+            .arg("-DENABLE_METAL=OFF")
+            .arg("-DENABLE_OPENGL=OFF")
+
+            // ★ FIX: wymuszamy generator Xcode na macOS
+            .arg("-G")
+            .arg("Xcode")
+
             .current_dir(&build_dir),
         "cmake configure",
     )?;
