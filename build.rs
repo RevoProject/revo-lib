@@ -7,8 +7,11 @@ use std::process::Command;
 const DEFAULT_OBS_REF: &str = "32.0.0";
 
 fn run(cmd: &mut Command, step: &str) -> Result<(), Box<dyn Error>> {
-    let status = cmd.status()?;
-    if !status.success() {
+    println!("cargo:warning=Running step: {step}");
+    let output = cmd.output()?;
+    println!("cargo:warning=stdout: {}", String::from_utf8_lossy(&output.stdout));
+    eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+    if !output.status.success() {
         return Err(format!("step failed: {step}").into());
     }
     Ok(())
