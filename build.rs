@@ -151,7 +151,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         // --- Install required dependencies via Homebrew ---
         println!("cargo:warning=Step: install deps via brew");
-        for pkg in &["simde", "ffmpeg", "mbedtls", "speexdsp"] {
+        for pkg in &["simde", "ffmpeg", "mbedtls", "speexdsp", "uthash"] {
             println!("cargo:warning=brew install {pkg}");
             let status = Command::new("brew")
                 .arg("install")
