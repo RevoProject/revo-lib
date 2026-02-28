@@ -127,6 +127,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             // ★ FIX: wyłączamy renderery, które psują build headless
             .arg("-DENABLE_METAL=OFF")
             .arg("-DENABLE_OPENGL=OFF")
+            .arg("-DENABLE_SYPHON=OFF")
 
             // ★ FIX: wymuszamy generator Xcode na macOS
             .arg("-G")
