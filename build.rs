@@ -128,7 +128,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // macOS-specific
         cmake
             .arg("-DENABLE_PIPEWIRE=OFF")
-            .arg("-G").arg("Xcode");
+            .arg("-G").arg("Ninja");
     } else {
         // Linux-specific
         cmake
