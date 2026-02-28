@@ -174,9 +174,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     
         // --- Configure cmake flags ---
         println!("cargo:warning=Step: configure cmake flags (macos)");
+        
+        // Determine Homebrew prefix based on architecture
+        let brew_prefix = if cfg!(target_arch = "aarch64") {
+            "/opt/homebrew"
+        } else {
+            "/usr/local"
+        };
+        
         cmake
             .arg("-G").arg("Xcode")
-            .arg("-DCMAKE_PREFIX_PATH=/usr/local")
+            .arg(format!("-DCMAKE_PREFIX_PATH={}", brew_prefix))
             .arg("-DCMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD=c++17")
             .arg("-DCMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LIBRARY=libc++")
             .arg("-DENABLE_SCRIPTING=OFF")
