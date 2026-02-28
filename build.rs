@@ -125,24 +125,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     // --- PLATFORM-SPECIFIC FLAGS ---
     
     if cfg!(target_os = "macos") {
-        // macOS-specific
+        let metal_cmake_candidates = [
+            obs_src.join("libobs-metal/CMakeLists.txt"),
+            obs_src.join("libobs/CMakeLists.txt"),
+        ];
+        for metal_cmake in &metal_cmake_candidates {
+            if metal_cmake.exists() {
+                let content = fs::read_to_string(metal_cmake)?;
+                if content.contains("libobs-metal") && !content.contains("LINKER_LANGUAGE") {
+                    let patched = content + "\nset_target_properties(libobs-metal PROPERTIES LINKER_LANGUAGE CXX)\n";
+                    fs::write(metal_cmake, patched)?;
+                }
+            }
+        }
+    
         cmake
             .arg("-G").arg("Xcode")
-            .arg("-DCMAKE_LINKER_LANGUAGE=CXX")
             .arg("-DCMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD=c++17")
             .arg("-DCMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LIBRARY=libc++")
             .arg("-DENABLE_PIPEWIRE=OFF");
         let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
         cmake.arg(format!("-DCMAKE_OSX_ARCHITECTURES={}", arch));
-    } else {
-        // Linux-specific
-        cmake
-            .arg("-DENABLE_PIPEWIRE=ON")
-            .arg("-DENABLE_WAYLAND=ON")
-            .arg("-DENABLE_X11=ON");
     }
-    
-    run(cmake.current_dir(&build_dir), "cmake configure")?;
 
 
     // 4) Build
