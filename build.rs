@@ -128,6 +128,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // macOS-specific
         cmake
             .arg("-G").arg("Xcode")
+            .arg("-DCMAKE_LINKER_LANGUAGE=CXX")
             .arg("-DCMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD=c++17")
             .arg("-DCMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LIBRARY=libc++")
             .arg("-DENABLE_PIPEWIRE=OFF");
