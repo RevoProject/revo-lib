@@ -108,34 +108,37 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     fs::create_dir_all(&build_dir)?;
 
-    // 3) Configure OBS
-    run(
-        Command::new("cmake")
-            .arg("..")
-            .arg("-DCMAKE_BUILD_TYPE=Release")
-            .arg("-DENABLE_UI=OFF")
-            .arg("-DENABLE_FRONTEND=OFF")
-            .arg("-DENABLE_WEBSOCKET=ON")
-            .arg("-DENABLE_BROWSER=OFF")
-            .arg("-DENABLE_AJA=OFF")
-            .arg("-DENABLE_NVENC=OFF")
-            .arg("-DENABLE_QSV11=OFF")
-            .arg("-DENABLE_VST=OFF")
+   // 3) Configure OBS
+    let mut cmake = Command::new("cmake");
+    cmake.arg("..")
+        .arg("-DCMAKE_BUILD_TYPE=Release")
+        .arg("-DENABLE_UI=OFF")
+        .arg("-DENABLE_FRONTEND=OFF")
+        .arg("-DENABLE_WEBSOCKET=ON")
+        .arg("-DENABLE_BROWSER=OFF")
+        .arg("-DENABLE_AJA=OFF")
+        .arg("-DENABLE_NVENC=OFF")
+        .arg("-DENABLE_QSV11=OFF")
+        .arg("-DENABLE_VST=OFF")
+        .arg("-DENABLE_NEW_MPEGTS_OUTPUT=OFF");
+    
+    // --- PLATFORM-SPECIFIC FLAGS ---
+    
+    if cfg!(target_os = "macos") {
+        // macOS-specific
+        cmake
+            .arg("-DENABLE_PIPEWIRE=OFF")
+            .arg("-G").arg("Xcode");
+    } else {
+        // Linux-specific
+        cmake
             .arg("-DENABLE_PIPEWIRE=ON")
-            .arg("-DENABLE_NEW_MPEGTS_OUTPUT=OFF")
+            .arg("-DENABLE_WAYLAND=ON")
+            .arg("-DENABLE_X11=ON");
+    }
+    
+    run(cmake.current_dir(&build_dir), "cmake configure")?;
 
-            // ★ FIX: wyłączamy renderery, które psują build headless
-            .arg("-DENABLE_METAL=OFF")
-            .arg("-DENABLE_OPENGL=OFF")
-            .arg("-DENABLE_SYPHON=OFF")
-
-            // ★ FIX: wymuszamy generator Xcode na macOS
-            .arg("-G")
-            .arg("Xcode")
-
-            .current_dir(&build_dir),
-        "cmake configure",
-    )?;
 
     // 4) Build
     run(
