@@ -11,8 +11,7 @@ jobs:
 
     env:
       CMAKE_GENERATOR: Xcode
-      ENABLE_METAL: OFF
-
+      CMAKE_ARGS: "-DENABLE_METAL=OFF -DENABLE_OPENGL=OFF"
 
     steps:
       - name: Checkout
@@ -25,6 +24,7 @@ jobs:
 
       - name: Build
         run: cargo build --release
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
