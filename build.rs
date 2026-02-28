@@ -148,6 +148,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         if !patched_any {
             println!("cargo:warning=No libobs-metal target found to patch");
         }
+
+        // --- Install required dependencies via Homebrew ---
+        println!("cargo:warning=Step: install deps via brew");
+        run(
+            Command::new("brew")
+                .arg("install")
+                .arg("simde")
+                .arg("ffmpeg")
+                .arg("mbedtls")
+                .arg("libdatachannel"),
+            "brew install deps",
+        )?;
     
         // --- Patch buildspec.cmake to skip dep downloads (no network) ---
         println!("cargo:warning=Step: patch buildspec.cmake to skip downloads");
