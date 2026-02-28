@@ -9,10 +9,6 @@ jobs:
   build:
     runs-on: macos-15-intel
 
-    env:
-      CMAKE_GENERATOR: Xcode
-      CMAKE_ARGS: "-DENABLE_METAL=OFF -DENABLE_OPENGL=OFF"
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
