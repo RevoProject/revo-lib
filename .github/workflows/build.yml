@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-15-intel
 
     steps:
       - name: Checkout
@@ -15,10 +15,6 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install dependencies
-        run: |
-          brew install cmake
-          
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         
