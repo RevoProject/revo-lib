@@ -11,6 +11,7 @@ jobs:
 
     env:
       CMAKE_GENERATOR: Xcode
+      ENABLE_METAL: OFF
 
 
     steps:
