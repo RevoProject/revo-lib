@@ -150,27 +150,39 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 
     // 4) Build
-    run(
-        Command::new("cmake")
-            .arg("--build")
-            .arg(".")
-            .arg("-j")
-            .arg(nproc())
-            .current_dir(&build_dir),
-        "cmake build",
-    )?;
+    let mut build_cmd = Command::new("cmake");
+    build_cmd
+        .arg("--build")
+        .arg(".");
+    
+    if cfg!(target_os = "macos") {
+        build_cmd.arg("--config").arg("Release");
+    }
+    
+    build_cmd
+        .arg("-j")
+        .arg(nproc())
+        .current_dir(&build_dir);
+    
+    run(&mut build_cmd, "cmake build")?;
 
     // 5) Install to build dir: Release/core
     fs::create_dir_all(build_dir.join("Release/core"))?;
-    run(
-        Command::new("cmake")
-            .arg("--install")
-            .arg(".")
-            .arg("--prefix")
-            .arg(build_dir.join("Release/core"))
-            .current_dir(&build_dir),
-        "cmake install",
-    )?;
+    let mut install_cmd = Command::new("cmake");
+    install_cmd
+        .arg("--install")
+        .arg(".");
+    
+    if cfg!(target_os = "macos") {
+        install_cmd.arg("--config").arg("Release");
+    }
+    
+    install_cmd
+        .arg("--prefix")
+        .arg(build_dir.join("Release/core"))
+        .current_dir(&build_dir);
+    
+    run(&mut install_cmd, "cmake install")?;
 
     // 6) Generate Rust FFI bindings
     let wrapper = manifest_dir.join("src/ffi/wrapper.h");
