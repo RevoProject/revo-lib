@@ -128,8 +128,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     // --- PLATFORM-SPECIFIC FLAGS ---
     
     if cfg!(target_os = "macos") {
-        // Search entire obs-studio tree for the file that defines libobs-metal
-        println!("cargo:warning=Searching for libobs-metal definition...");
+        // --- Patch libobs-metal LINKER_LANGUAGE ---
+        println!("cargo:warning=Step: patch libobs-metal linker language");
         let mut patched_any = false;
         for entry in walkdir::WalkDir::new(&obs_src)
             .into_iter()
@@ -146,11 +146,24 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
         if !patched_any {
-            println!("cargo:warning=No libobs-metal target found to patch (may already be patched or not present)");
+            println!("cargo:warning=No libobs-metal target found to patch");
         }
     
+        // --- Patch buildspec.cmake to skip dep downloads (no network) ---
+        println!("cargo:warning=Step: patch buildspec.cmake to skip downloads");
+        let buildspec_macos = obs_src.join("cmake/macos/buildspec.cmake");
+        if buildspec_macos.exists() {
+            println!("cargo:warning=Replacing buildspec.cmake with no-op");
+            fs::write(&buildspec_macos, "# PATCHED: no-op, skip dependency downloads\n")?;
+        } else {
+            println!("cargo:warning=buildspec.cmake not found, skipping");
+        }
+    
+        // --- Configure cmake flags ---
+        println!("cargo:warning=Step: configure cmake flags (macos)");
         cmake
             .arg("-G").arg("Xcode")
+            .arg("-DCMAKE_PREFIX_PATH=/usr/local")
             .arg("-DCMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD=c++17")
             .arg("-DCMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LIBRARY=libc++")
             .arg("-DENABLE_SCRIPTING=OFF")
@@ -158,15 +171,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             .arg("-DENABLE_PIPEWIRE=OFF");
         let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
         cmake.arg(format!("-DCMAKE_OSX_ARCHITECTURES={}", arch));
+    
     } else {
-        // Linux-specific flags
+        // --- Configure cmake flags (linux) ---
+        println!("cargo:warning=Step: configure cmake flags (linux)");
         cmake
             .arg("-DENABLE_PIPEWIRE=ON")
             .arg("-DENABLE_WAYLAND=ON")
             .arg("-DENABLE_X11=ON");
     }
 
-    // THIS LINE MUST EXIST HERE
+    // IMPORTANT LINE
     run(cmake.current_dir(&build_dir), "cmake configure")?;
 
 
