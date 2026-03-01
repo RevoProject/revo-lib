@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-const DEFAULT_OBS_REF: &str = "32.0.0";
+const DEFAULT_OBS_REF: &str = "32.1.0-rc1";
 
 fn run(cmd: &mut Command, step: &str) -> Result<(), Box<dyn Error>> {
     println!("cargo:warning=Running step: {step}");
@@ -197,6 +197,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         cmake
             .arg("-G").arg("Ninja")
             .arg(format!("-DCMAKE_PREFIX_PATH={}", brew_prefix))
+            .arg(format!("-DCMAKE_INSTALL_PREFIX={}", install_prefix.display()))
             .arg("-DCMAKE_CXX_STANDARD=17")
             .arg("-DENABLE_SCRIPTING=OFF")
             .arg("-DENABLE_VIRTUALCAM=OFF")
@@ -248,6 +249,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .header(wrapper.to_string_lossy())
         .clang_arg(format!("-I{}", install_prefix.join("include").display()))
         .clang_arg(format!("-I{}", install_prefix.join("include/obs").display()))
+        .clang_arg(format!("-I{}", obs_src.join("libobs").display()))
         .allowlist_function("obs_.*")
         .allowlist_function("base_.*")
         .allowlist_function("gs_.*")
