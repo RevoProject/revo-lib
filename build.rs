@@ -222,7 +222,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     build_cmd
         .arg("--build")
         .arg(".")
-        .arg("--target").arg("obs")
+        .arg("--target").arg("libobs")
         .arg("--parallel")
         .arg(nproc())
         .current_dir(&build_dir);
