@@ -14,10 +14,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
+          
       - name: Install dependencies
         run: |
-          brew install cmake ninja
+          brew update
+          brew install simde ffmpeg mbedtls speexdsp uthash jansson
           
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -31,4 +32,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: revo-lib
-          path: target/release/
+          path: |
+            target/release/
+            obs-libobs/obs-studio/build-headless/install
