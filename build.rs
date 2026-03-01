@@ -251,6 +251,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .clang_arg(format!("-I{}", install_prefix.join("include/obs").display()))
         .clang_arg(format!("-I{}", obs_src.join("libobs").display()))
         .clang_arg(format!("-I{}", build_dir.display()))
+        .clang_arg(format!("-I{}", build_dir.join("libobs").display()))
         .allowlist_function("obs_.*")
         .allowlist_function("base_.*")
         .allowlist_function("gs_.*")
