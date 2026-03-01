@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let obs_root = manifest_dir.join("obs-libobs");
     let obs_src = obs_root.join("obs-studio");
     let build_dir = obs_src.join("build-headless");
-    let install_prefix = build_dir.join("Release/core");
+    let install_prefix = build_dir.join("install");
 
     // 1) Fetch obs-studio source into revo-lib/obs-libobs
     if !obs_src.exists() {
@@ -117,13 +117,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         .arg("-DCMAKE_BUILD_TYPE=Release")
         .arg("-DENABLE_UI=OFF")
         .arg("-DENABLE_FRONTEND=OFF")
-        .arg("-DENABLE_WEBSOCKET=ON")
+        .arg("-DENABLE_WEBSOCKET=OFF")
         .arg("-DENABLE_BROWSER=OFF")
         .arg("-DENABLE_AJA=OFF")
         .arg("-DENABLE_NVENC=OFF")
         .arg("-DENABLE_QSV11=OFF")
         .arg("-DENABLE_VST=OFF")
-        .arg("-DENABLE_NEW_MPEGTS_OUTPUT=OFF");
+        .arg("-DENABLE_NEW_MPEGTS_OUTPUT=OFF")
+        .arg("-DENABLE_PLUGINS=OFF")
+        .arg("-DBUILD_TESTS=OFF");
     
     // --- PLATFORM-SPECIFIC FLAGS ---
     
@@ -183,10 +185,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
         
         cmake
-            .arg("-G").arg("Xcode")
+            .arg("-G").arg("Ninja")
             .arg(format!("-DCMAKE_PREFIX_PATH={}", brew_prefix))
-            .arg("-DCMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD=c++17")
-            .arg("-DCMAKE_XCODE_ATTRIBUTE_CLANG_CXX_LIBRARY=libc++")
+            .arg("-DCMAKE_CXX_STANDARD=17")
             .arg("-DENABLE_SCRIPTING=OFF")
             .arg("-DENABLE_VIRTUALCAM=OFF")
             .arg("-DENABLE_PIPEWIRE=OFF");
@@ -206,37 +207,27 @@ fn main() -> Result<(), Box<dyn Error>> {
     run(cmake.current_dir(&build_dir), "cmake configure")?;
 
 
-    // 4) Build
+    // 4) Build only libobs target
     let mut build_cmd = Command::new("cmake");
     build_cmd
         .arg("--build")
-        .arg(".");
-    
-    if cfg!(target_os = "macos") {
-        build_cmd.arg("--config").arg("Release");
-    }
-    
-    build_cmd
-        .arg("-j")
+        .arg(".")
+        .arg("--target").arg("obs")
+        .arg("--parallel")
         .arg(nproc())
         .current_dir(&build_dir);
     
     run(&mut build_cmd, "cmake build")?;
 
     // 5) Install to build dir: Release/core
-    fs::create_dir_all(build_dir.join("Release/core"))?;
+    let install_dir = build_dir.join("install");
+    fs::create_dir_all(&install_dir)?;
     let mut install_cmd = Command::new("cmake");
     install_cmd
         .arg("--install")
-        .arg(".");
-    
-    if cfg!(target_os = "macos") {
-        install_cmd.arg("--config").arg("Release");
-    }
-    
-    install_cmd
+        .arg(".")
         .arg("--prefix")
-        .arg(build_dir.join("Release/core"))
+        .arg(&install_dir)
         .current_dir(&build_dir);
     
     run(&mut install_cmd, "cmake install")?;
