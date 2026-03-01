@@ -25,6 +25,45 @@ fn nproc() -> String {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+
+    // ── Fast-path: use a pre-built libobs artifact ──────────────────────────
+    // Set REVO_PREBUILT_LIBOBS_DIR to the directory downloaded from CI
+    // (e.g. libobs-prebuilt-macos-x86_64/) and the full OBS compilation is
+    // skipped.  Layout expected:
+    //   <dir>/lib/          – libobs.dylib / libobs.so / libobs.a
+    //   <dir>/include/      – public headers
+    //   <dir>/bindings/libobs_bindings.rs  – pre-generated Rust FFI bindings
+    if let Ok(prebuilt) = env::var("REVO_PREBUILT_LIBOBS_DIR") {
+        let prebuilt = PathBuf::from(&prebuilt);
+        println!("cargo:warning=Using prebuilt libobs from: {}", prebuilt.display());
+        println!("cargo:rerun-if-env-changed=REVO_PREBUILT_LIBOBS_DIR");
+
+        // Copy pre-generated bindings into OUT_DIR
+        let out_dir = PathBuf::from(env::var("OUT_DIR")?);
+        let src_bindings = prebuilt.join("bindings/libobs_bindings.rs");
+        if src_bindings.exists() {
+            fs::copy(&src_bindings, out_dir.join("libobs_bindings.rs"))?;
+        } else {
+            return Err(format!(
+                "REVO_PREBUILT_LIBOBS_DIR is set but bindings/libobs_bindings.rs not found in {}",
+                prebuilt.display()
+            ).into());
+        }
+
+        // Link against the prebuilt library
+        println!(
+            "cargo:rustc-link-search=native={}",
+            prebuilt.join("lib").display()
+        );
+        println!("cargo:rustc-link-lib=dylib=obs");
+        println!("cargo:rustc-link-lib=dylib=dl");
+        println!("cargo:rustc-link-lib=dylib=pthread");
+        println!("cargo:rustc-link-lib=dylib=m");
+
+        return Ok(());
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     let obs_ref = env::var("REVO_OBS_REF").unwrap_or_else(|_| DEFAULT_OBS_REF.to_string());
 
     let obs_root = manifest_dir.join("obs-libobs");
