@@ -174,24 +174,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("cargo:warning=buildspec.cmake not found, skipping");
         }
 
-        // --- Patch compilerconfig.cmake to remove Xcode-only requirement ---
+        // --- Patch compilerconfig.cmake to remove Xcode-only and version requirements ---
         println!("cargo:warning=Step: patch compilerconfig.cmake to allow Ninja");
         let compilerconfig = obs_src.join("cmake/macos/compilerconfig.cmake");
         if compilerconfig.exists() {
-            let content = fs::read_to_string(&compilerconfig)?;
-            let patched = content
-                .lines()
-                .map(|line| {
-                    if line.contains("requires Xcode generator") || line.contains("CMAKE_GENERATOR") && line.contains("Xcode") {
-                        format!("# PATCHED: {}", line)
-                    } else {
-                        line.to_string()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            fs::write(&compilerconfig, patched)?;
-            println!("cargo:warning=Patched compilerconfig.cmake");
+            println!("cargo:warning=Replacing compilerconfig.cmake with no-op");
+            fs::write(&compilerconfig, "# PATCHED: no-op, skip Xcode/SDK requirements\n")?;
         } else {
             println!("cargo:warning=compilerconfig.cmake not found, skipping");
         }
