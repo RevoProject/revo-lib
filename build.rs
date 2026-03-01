@@ -51,14 +51,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         // Link against the prebuilt library
-        println!(
-            "cargo:rustc-link-search=native={}",
-            prebuilt.join("lib").display()
-        );
-        println!("cargo:rustc-link-lib=dylib=obs");
-        println!("cargo:rustc-link-lib=dylib=dl");
-        println!("cargo:rustc-link-lib=dylib=pthread");
-        println!("cargo:rustc-link-lib=dylib=m");
+        if cfg!(target_os = "macos") {
+            // macOS builds libobs as a framework: framework/libobs.framework
+            println!(
+                "cargo:rustc-link-search=framework={}",
+                prebuilt.join("framework").display()
+            );
+            println!("cargo:rustc-link-lib=framework=obs");
+        } else {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                prebuilt.join("lib").display()
+            );
+            println!("cargo:rustc-link-lib=dylib=obs");
+            println!("cargo:rustc-link-lib=dylib=dl");
+            println!("cargo:rustc-link-lib=dylib=pthread");
+            println!("cargo:rustc-link-lib=dylib=m");
+        }
 
         return Ok(());
     }
