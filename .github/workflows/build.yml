@@ -352,38 +352,99 @@ jobs:
             jansson:x64-windows-release `
             uthash:x64-windows-release `
             simde:x64-windows-release
+
+          # Export VCPKG_ROOT for subsequent steps (build.rs reads it for toolchain)
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Write-Host "Exported VCPKG_ROOT=$vcpkgRoot"
   
       - name: Build (revo-lib) + build.rs builds OBS
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-  
-          # Point build.rs/CMake to vcpkg toolchain
-          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
-          $env:VCPKG_TOOLCHAIN_FILE = Join-Path $env:VCPKG_ROOT "scripts\buildsystems\vcpkg.cmake"
+
+          # VCPKG_ROOT is written to GITHUB_ENV by the install step above;
+          # it is already available as a process env var here.
+          Write-Host "VCPKG_ROOT=$env:VCPKG_ROOT"
+          Write-Host "CMAKE_SYSTEM_VERSION=$env:CMAKE_SYSTEM_VERSION"
+
+          if (-not $env:VCPKG_ROOT -or -not (Test-Path $env:VCPKG_ROOT)) {
+            throw "VCPKG_ROOT ('$env:VCPKG_ROOT') is not set or does not exist."
+          }
+
           $env:VCPKG_DEFAULT_TRIPLET = "x64-windows-release"
-  
-          # IMPORTANT: do NOT force manifests here (it can break classic mode)
-          # $env:VCPKG_FEATURE_FLAGS = "manifests"
-  
+
           cargo build --release
   
-      - name: Package artifact (basic)
+      - name: Package artifact (prebuilt layout)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-  
+
           $arch = "x86_64"
           $staging = "libobs-prebuilt-windows-$arch"
-          New-Item -ItemType Directory -Force -Path $staging | Out-Null
-  
-          New-Item -ItemType Directory -Force -Path "$staging\target-release" | Out-Null
-          Copy-Item -Recurse -Force "target\release\*" "$staging\target-release\"
-  
-          "REVO_OBS_REF=$env:REVO_OBS_REF" | Out-File -Append -Encoding ascii "$staging\build-info.env"
-          "BUILD_DATE=$(Get-Date -AsUTC -Format o)" | Out-File -Append -Encoding ascii "$staging\build-info.env"
-          "ARCH=$arch" | Out-File -Append -Encoding ascii "$staging\build-info.env"
-  
+
+          $obsSrc    = "obs-libobs\obs-studio"
+          $buildDir  = "$obsSrc\build-headless"
+          $installDir = "$buildDir\install"
+
+          New-Item -ItemType Directory -Force -Path "$staging\lib"      | Out-Null
+          New-Item -ItemType Directory -Force -Path "$staging\bin"      | Out-Null
+          New-Item -ItemType Directory -Force -Path "$staging\include\obs" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$staging\bindings" | Out-Null
+
+          # 1) Import lib (obs.lib) – searched by rustc
+          $obsLib = Get-ChildItem -Recurse "$buildDir" -Filter "obs.lib" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($obsLib) {
+            Copy-Item $obsLib.FullName "$staging\lib\obs.lib"
+            Write-Host "Copied obs.lib from $($obsLib.FullName)"
+          } else {
+            Write-Warning "obs.lib not found under $buildDir"
+          }
+
+          # 2) DLL (obs.dll) – needed at runtime
+          $obsDll = Get-ChildItem -Recurse "$buildDir" -Filter "obs.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($obsDll) {
+            Copy-Item $obsDll.FullName "$staging\bin\obs.dll"
+            Write-Host "Copied obs.dll from $($obsDll.FullName)"
+          } else {
+            Write-Warning "obs.dll not found under $buildDir"
+          }
+
+          # 3) Headers
+          if (Test-Path "$installDir\include\obs") {
+            Copy-Item -Recurse "$installDir\include\obs\*" "$staging\include\obs\"
+            Write-Host "Copied installed headers from $installDir\include\obs"
+          }
+          Get-ChildItem "$obsSrc\libobs" -Filter "*.h" | ForEach-Object {
+            Copy-Item $_.FullName "$staging\include\obs\" -Force
+          }
+          # obsconfig.h
+          $obscfg = Get-ChildItem -Recurse "$buildDir" -Filter "obsconfig.h" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($obscfg) {
+            Copy-Item $obscfg.FullName "$staging\include\obs\obsconfig.h" -Force
+            Write-Host "Copied obsconfig.h from $($obscfg.FullName)"
+          } else {
+            Write-Warning "obsconfig.h not found"
+          }
+
+          # 4) Bindings
+          $bindings = Get-ChildItem -Recurse "target" -Filter "libobs_bindings.rs" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($bindings) {
+            Copy-Item $bindings.FullName "$staging\bindings\libobs_bindings.rs"
+            Write-Host "Copied bindings from $($bindings.FullName)"
+          } else {
+            Write-Error "libobs_bindings.rs not found in target\**\out\"
+            exit 1
+          }
+
+          # 5) Metadata
+          "REVO_OBS_REF=$env:REVO_OBS_REF"             | Out-File -Append -Encoding ascii "$staging\build-info.env"
+          "BUILD_DATE=$(Get-Date -AsUTC -Format o)"    | Out-File -Append -Encoding ascii "$staging\build-info.env"
+          "ARCH=$arch"                                  | Out-File -Append -Encoding ascii "$staging\build-info.env"
+
+          Write-Host "Artifact layout:"
+          Get-ChildItem -Recurse $staging | Where-Object { -not $_.Name.EndsWith(".h") } | Sort-Object FullName | ForEach-Object { Write-Host $_.FullName }
+
           "STAGING=$staging" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
   
       - name: Upload Windows artifact

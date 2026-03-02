@@ -253,6 +253,53 @@ fn main() -> Result<(), Box<dyn Error>> {
         let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
         cmake.arg(format!("-DCMAKE_OSX_ARCHITECTURES={}", arch));
     
+    } else if cfg!(target_os = "windows") {
+        // --- Configure cmake flags (windows) ---
+        println!("cargo:warning=Step: configure cmake flags (windows)");
+
+        // Patch windows/compilerconfig.cmake to remove SDK version check
+        println!("cargo:warning=Step: patch windows/compilerconfig.cmake");
+        let win_compilerconfig = obs_src.join("cmake/windows/compilerconfig.cmake");
+        if win_compilerconfig.exists() {
+            println!("cargo:warning=Replacing windows/compilerconfig.cmake with no-op");
+            fs::write(&win_compilerconfig, "# PATCHED: no-op, skip SDK version requirements\n")?;
+        } else {
+            println!("cargo:warning=windows/compilerconfig.cmake not found, skipping");
+        }
+
+        // Patch windows/buildspec.cmake to skip pre-built dep downloads (we use vcpkg)
+        println!("cargo:warning=Step: patch windows/buildspec.cmake to skip downloads");
+        let buildspec_win = obs_src.join("cmake/windows/buildspec.cmake");
+        if buildspec_win.exists() {
+            println!("cargo:warning=Replacing windows/buildspec.cmake with no-op");
+            fs::write(&buildspec_win, "# PATCHED: no-op, deps provided by vcpkg\n")?;
+        }
+
+        // Windows SDK version: prefer CMAKE_SYSTEM_VERSION env var (set by workflow)
+        let sdk_ver = env::var("CMAKE_SYSTEM_VERSION")
+            .unwrap_or_else(|_| "10.0.20348.0".to_string());
+        println!("cargo:warning=Using Windows SDK: {sdk_ver}");
+
+        cmake.arg("-G").arg("Ninja");
+        cmake.arg(format!("-DCMAKE_SYSTEM_VERSION={sdk_ver}"));
+        cmake.arg(format!("-DCMAKE_INSTALL_PREFIX={}", install_prefix.display()));
+
+        // vcpkg integration
+        if let Ok(vcpkg_root) = env::var("VCPKG_ROOT") {
+            let toolchain = PathBuf::from(&vcpkg_root)
+                .join("scripts/buildsystems/vcpkg.cmake");
+            println!("cargo:warning=Using vcpkg toolchain: {}", toolchain.display());
+            cmake.arg(format!("-DCMAKE_TOOLCHAIN_FILE={}", toolchain.display()));
+            cmake.arg("-DVCPKG_TARGET_TRIPLET=x64-windows-release");
+        } else {
+            println!("cargo:warning=VCPKG_ROOT not set, skipping vcpkg toolchain");
+        }
+
+        cmake
+            .arg("-DENABLE_SCRIPTING=OFF")
+            .arg("-DENABLE_VIRTUALCAM=OFF")
+            .arg("-DENABLE_WIN_CRASH_HANDLER=OFF");
+
     } else {
         // --- Configure cmake flags (linux) ---
         println!("cargo:warning=Step: configure cmake flags (linux)");
@@ -264,7 +311,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // IMPORTANT LINE
     run(cmake.current_dir(&build_dir), "cmake configure")?;
-
 
     // 4) Build only libobs target
     let mut build_cmd = Command::new("cmake");
@@ -325,10 +371,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         "cargo:rustc-link-search=native={}",
         install_prefix.join("lib64").display()
     );
-    println!("cargo:rustc-link-lib=dylib=obs");
-    println!("cargo:rustc-link-lib=dylib=dl");
-    println!("cargo:rustc-link-lib=dylib=pthread");
-    println!("cargo:rustc-link-lib=dylib=m");
+    if cfg!(target_os = "windows") {
+        // On Windows the import lib is obs.lib; no dl/pthread/m needed.
+        println!("cargo:rustc-link-search=native={}", install_prefix.join("bin").display());
+        println!("cargo:rustc-link-lib=dylib=obs");
+    } else {
+        println!("cargo:rustc-link-lib=dylib=obs");
+        println!("cargo:rustc-link-lib=dylib=dl");
+        println!("cargo:rustc-link-lib=dylib=pthread");
+        println!("cargo:rustc-link-lib=dylib=m");
+    }
 
     println!("cargo:rerun-if-changed={}", wrapper.display());
 
