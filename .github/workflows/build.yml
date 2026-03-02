@@ -141,7 +141,6 @@ jobs:
 
           # Re-sign after modifications
           codesign --force --sign - "${FW_DIR}" || true
-
       - name: CALCULATED BUNDLE SIZE (system deps referenced by obs.framework)
         shell: bash
         run: |
@@ -163,12 +162,6 @@ jobs:
           echo "Framework bin: ${FW_BIN}"
           echo
 
-          if [ ! -f "${FW_BIN}" ]; then
-            echo "ERROR: Framework binary not found: ${FW_BIN}" >&2
-            find "${STAGING}/framework" -maxdepth 4 -print || true
-            exit 1
-          fi
-
           echo "[STAGING TOTAL]"
           du -sh "${STAGING}" || true
           echo
@@ -177,87 +170,77 @@ jobs:
           du -sh "${FW_DIR}" || true
           echo
 
-          DEPS_FILE="$(mktemp)"
-          FFMPEG_FILE="$(mktemp)"
-          OTHER_BREW_FILE="$(mktemp)"
-          APPLE_FILE="$(mktemp)"
+          echo "[BREW INFO]"
+          command -v brew || true
+          BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
+          echo "brew --prefix: ${BREW_PREFIX}"
+          echo "Exists /usr/local/opt? $(test -d /usr/local/opt && echo yes || echo no)"
+          echo "Exists /opt/homebrew/opt? $(test -d /opt/homebrew/opt && echo yes || echo no)"
+          echo
 
+          echo "[DEPENDENCIES FROM otool -L]"
+          DEPS_FILE="$(mktemp)"
           otool -L "${FW_BIN}" \
             | tail -n +2 \
             | awk '{print $1}' \
             | grep -vE '^(@rpath|@loader_path|@executable_path)' \
             | grep -E '^/' \
             | sort -u > "${DEPS_FILE}" || true
-
-          echo "[DEPENDENCIES FROM otool -L]"
-          if [ ! -s "${DEPS_FILE}" ]; then
-            echo "(none)"
-          else
-            sed 's/^/ - /' "${DEPS_FILE}"
-          fi
+          sed 's/^/ - /' "${DEPS_FILE}" || true
           echo
 
-          grep -E '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' "${DEPS_FILE}" > "${FFMPEG_FILE}" || true
-          grep -E '^(/usr/local/opt|/opt/homebrew/opt)/' "${DEPS_FILE}" \
-            | grep -vE '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' > "${OTHER_BREW_FILE}" || true
-          grep -E '^(/System/|/usr/lib/)' "${DEPS_FILE}" > "${APPLE_FILE}" || true
+          echo "[CHECK IF otool PATHS EXIST ON DISK]"
+          while IFS= read -r p; do
+            [ -n "${p}" ] || continue
+            if [ -e "${p}" ]; then
+              echo "OK  ${p}"
+            else
+              echo "MISS ${p}"
+            fi
+          done < "${DEPS_FILE}"
+          echo
 
-          sum_sizes () {
+          echo "[FFMPEG SIZE (by brew prefix)]"
+          if brew --prefix ffmpeg >/dev/null 2>&1; then
+            FFMPEG_PREFIX="$(brew --prefix ffmpeg)"
+            echo "ffmpeg prefix: ${FFMPEG_PREFIX}"
+            echo "ffmpeg lib dir size: "
+            du -sh "${FFMPEG_PREFIX}/lib" || true
+            echo "ffmpeg dylibs:"
+            ls -lh "${FFMPEG_PREFIX}/lib"/libav*.dylib 2>/dev/null || true
+            echo "ffmpeg dylib total:"
             python3 - <<'PY'
-          import os, sys
-          total = 0
-          missing = []
-          for line in sys.stdin:
-              p = line.strip()
-              if not p:
-                  continue
-              if os.path.exists(p):
-                  total += os.path.getsize(p)
-              else:
-                  missing.append(p)
-          
+          import glob, os
+          paths = glob.glob(os.path.join(os.environ["FFMPEG_PREFIX"], "lib", "libav*.dylib"))
+          total = sum(os.path.getsize(p) for p in paths if os.path.exists(p))
           print(f"{total/1024/1024:.2f} MB")
-          if missing:
-              print("Missing on runner:")
-              for m in missing:
-                  print(f" - {m}")
           PY
-          }
-
-          echo "[FFMPEG DEPS]"
-          if [ ! -s "${FFMPEG_FILE}" ]; then
-            echo "(none)"
+                    else
+                      echo "ffmpeg not installed (brew --prefix ffmpeg failed)"
+                    fi
+                    echo
+          
+                    echo "[JANSSON SIZE (by brew prefix)]"
+                    if brew --prefix jansson >/dev/null 2>&1; then
+                      JANSSON_PREFIX="$(brew --prefix jansson)"
+                      echo "jansson prefix: ${JANSSON_PREFIX}"
+                      ls -lh "${JANSSON_PREFIX}/lib"/libjansson*.dylib 2>/dev/null || true
+                      python3 - <<'PY'
+          import glob, os
+          paths = glob.glob(os.path.join(os.environ["JANSSON_PREFIX"], "lib", "libjansson*.dylib"))
+          total = sum(os.path.getsize(p) for p in paths if os.path.exists(p))
+          print(f"{total/1024/1024:.2f} MB")
+          PY
           else
-            sed 's/^/ - /' "${FFMPEG_FILE}"
+            echo "jansson not installed (brew --prefix jansson failed)"
           fi
-          echo -n "FFmpeg total size on runner: "
-          cat "${FFMPEG_FILE}" | sum_sizes
           echo
 
-          echo "[OTHER HOMEBREW DEPS]"
-          if [ ! -s "${OTHER_BREW_FILE}" ]; then
-            echo "(none)"
-          else
-            sed 's/^/ - /' "${OTHER_BREW_FILE}"
-          fi
-          echo -n "Other Homebrew total size on runner: "
-          cat "${OTHER_BREW_FILE}" | sum_sizes
-          echo
+          rm -f "${DEPS_FILE}"
+        env:
+          FFMPEG_PREFIX: ""
+          JANSSON_PREFIX: ""
 
-          echo "[APPLE SYSTEM DEPS]"
-          if [ ! -s "${APPLE_FILE}" ]; then
-            echo "(none)"
-          else
-            sed 's/^/ - /' "${APPLE_FILE}"
-          fi
-          echo -n "Apple system deps total size on runner: "
-          cat "${APPLE_FILE}" | sum_sizes
-          echo
-
-          echo "[SUMMARY]"
-          echo "If you want a portable .app/.dmg, you must vendor anything under /usr/local/opt or /opt/homebrew/opt into the app bundle and rewrite install names to @rpath/@loader_path."
-
-          rm -f "${DEPS_FILE}" "${FFMPEG_FILE}" "${OTHER_BREW_FILE}" "${APPLE_FILE}"
       - name: Upload libobs prebuilt artifact
         uses: actions/upload-artifact@v4
         with:
