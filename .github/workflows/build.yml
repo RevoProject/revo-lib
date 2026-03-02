@@ -289,27 +289,27 @@ jobs:
             throw "Windows Kits not found at: $kitsRoot"
           }
       
-          # Find installed SDK versions
-          $versions = Get-ChildItem -Directory $kitsRoot | Select-Object -ExpandProperty Name
-          Write-Host "Installed Windows SDK versions:"
-          $versions | Sort-Object | ForEach-Object { Write-Host " - $_" }
+          $all = Get-ChildItem -Directory $kitsRoot | Select-Object -ExpandProperty Name
       
-          # Pick the newest one
-          $selected = ($versions | Sort-Object {[version]$_} | Select-Object -Last 1)
-          if (-not $selected) { throw "Could not determine installed Windows SDK version." }
+          Write-Host "Installed Windows SDK entries:"
+          $all | Sort-Object | ForEach-Object { Write-Host " - $_" }
       
+          # Keep only semantic SDK version folders like 10.0.22621.0, skip 'wdf'
+          $versions = $all | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' }
+          if (-not $versions -or $versions.Count -eq 0) {
+            throw "No Windows SDK version folders found under: $kitsRoot"
+          }
+      
+          $selected = ($versions | Sort-Object {[version]$_} | Select-Object -Last 1).Trim()
           Write-Host "Selected Windows SDK version: $selected"
       
-          # CMake/VS tooling often expects a trailing backslash in WindowsSDKVersion
-          "WindowsSDKVersion=$selected\" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-      
-          # Also help CMake explicitly
-          "CMAKE_SYSTEM_VERSION=$selected" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-      
-          # Sanity check: must be >= 10.0.20348.0
-          if ([version]($selected.TrimEnd("\")) -lt [version]"10.0.20348.0") {
-            throw "Selected SDK $selected is still < 10.0.20348.0"
+          if ([version]$selected -lt [version]"10.0.20348.0") {
+            throw "Selected SDK $selected is < 10.0.20348.0 (OBS requirement)."
           }
+      
+          # Tooling typically expects trailing backslash
+          "WindowsSDKVersion=$selected\" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "CMAKE_SYSTEM_VERSION=$selected" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
   
       - name: Install Ninja
         shell: pwsh
