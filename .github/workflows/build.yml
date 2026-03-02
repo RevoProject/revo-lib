@@ -249,126 +249,125 @@ jobs:
           name: ${{ env.STAGING }}
           path: ${{ env.STAGING }}/
           if-no-files-found: error
-
-    build-windows:
-      name: Build (Windows)
-      runs-on: windows-2022
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-2022
   
-      env:
-        RUST_BACKTRACE: "1"
-        REVO_OBS_REF: "32.1.0-rc1"
+    env:
+      RUST_BACKTRACE: "1"
+      REVO_OBS_REF: "32.1.0-rc1"
   
-        # Force single-config generator so Release is consistent (fix Debug build + Release install mismatch)
-        CMAKE_GENERATOR: "Ninja"
-        CMAKE_BUILD_TYPE: "Release"
+      # Force single-config generator so Release is consistent (fix Debug build + Release install mismatch)
+      CMAKE_GENERATOR: "Ninja"
+      CMAKE_BUILD_TYPE: "Release"
   
-        # vcpkg settings (Release only)
-        VCPKG_DEFAULT_TRIPLET: "x64-windows-release"
-        VCPKG_ROOT: "C:\\vcpkg"
+      # vcpkg settings (Release only)
+      VCPKG_DEFAULT_TRIPLET: "x64-windows-release"
+      VCPKG_ROOT: "C:\\vcpkg"
   
-      steps:
-        - name: Checkout
-          uses: actions/checkout@v4
-          with:
-            submodules: recursive
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
   
-        - name: Install Rust
-          uses: dtolnay/rust-toolchain@stable
-          with:
-            targets: x86_64-pc-windows-msvc
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
   
-        - name: Setup MSVC
-          uses: ilammy/msvc-dev-cmd@v1
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
   
-        - name: Install Ninja
-          shell: pwsh
-          run: |
-            $ErrorActionPreference = "Stop"
-            choco install -y ninja
-            ninja --version
+      - name: Install Ninja
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install -y ninja
+          ninja --version
   
-        - name: Ensure vcpkg exists
-          shell: pwsh
-          run: |
-            $ErrorActionPreference = "Stop"
+      - name: Ensure vcpkg exists
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
   
-            if (-not (Test-Path $env:VCPKG_ROOT)) {
-              throw "Expected vcpkg at $env:VCPKG_ROOT but it does not exist on this runner."
+          if (-not (Test-Path $env:VCPKG_ROOT)) {
+            throw "Expected vcpkg at $env:VCPKG_ROOT but it does not exist on this runner."
+          }
+  
+          $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
+          if (-not (Test-Path $vcpkgExe)) {
+            Push-Location $env:VCPKG_ROOT
+            .\bootstrap-vcpkg.bat
+            Pop-Location
+          }
+  
+          & $vcpkgExe version
+  
+      - name: Install dependencies (vcpkg manifest + baseline, Release only)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
+  
+          # 1) vcpkg registry/baseline configuration (required by this vcpkg instance)
+          @'
+          {
+            "default-registry": {
+              "kind": "git",
+              "repository": "https://github.com/microsoft/vcpkg",
+              "baseline": "a2b1f9c0d5d3f8c8b6f1a0d9d6a2c4e4c2f7b123"
             }
+          }
+          '@ | Out-File -Encoding utf8 -NoNewline .\vcpkg-configuration.json
   
-            $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
-            if (-not (Test-Path $vcpkgExe)) {
-              Push-Location $env:VCPKG_ROOT
-              .\bootstrap-vcpkg.bat
-              Pop-Location
-            }
+          # 2) Manifest with builtin-baseline as well (some setups require it explicitly)
+          @'
+          {
+            "name": "revo-lib-ci",
+            "version-string": "0.0.0",
+            "builtin-baseline": "a2b1f9c0d5d3f8c8b6f1a0d9d6a2c4e4c2f7b123",
+            "dependencies": [
+              "ffmpeg",
+              "mbedtls",
+              "speexdsp",
+              "jansson",
+              "uthash",
+              "simde"
+            ]
+          }
+          '@ | Out-File -Encoding utf8 -NoNewline .\vcpkg.json
   
-            & $vcpkgExe version
+          & $vcpkgExe install --triplet $env:VCPKG_DEFAULT_TRIPLET
   
-        - name: Install dependencies (vcpkg manifest + baseline, Release only)
-          shell: pwsh
-          run: |
-            $ErrorActionPreference = "Stop"
-            $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
+      - name: Build (revo-lib) + build.rs builds OBS (Release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
   
-            # 1) vcpkg registry/baseline configuration (required by this vcpkg instance)
-            @'
-            {
-              "default-registry": {
-                "kind": "git",
-                "repository": "https://github.com/microsoft/vcpkg",
-                "baseline": "a2b1f9c0d5d3f8c8b6f1a0d9d6a2c4e4c2f7b123"
-              }
-            }
-            '@ | Out-File -Encoding utf8 -NoNewline .\vcpkg-configuration.json
+          $env:VCPKG_INSTALLATION_ROOT = $env:VCPKG_ROOT
+          $env:VCPKG_TOOLCHAIN_FILE = Join-Path $env:VCPKG_ROOT "scripts\buildsystems\vcpkg.cmake"
   
-            # 2) Manifest with builtin-baseline as well (some setups require it explicitly)
-            @'
-            {
-              "name": "revo-lib-ci",
-              "version-string": "0.0.0",
-              "builtin-baseline": "a2b1f9c0d5d3f8c8b6f1a0d9d6a2c4e4c2f7b123",
-              "dependencies": [
-                "ffmpeg",
-                "mbedtls",
-                "speexdsp",
-                "jansson",
-                "uthash",
-                "simde"
-              ]
-            }
-            '@ | Out-File -Encoding utf8 -NoNewline .\vcpkg.json
+          cargo build --release
   
-            & $vcpkgExe install --triplet $env:VCPKG_DEFAULT_TRIPLET
+      - name: Package artifact (basic)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
   
-        - name: Build (revo-lib) + build.rs builds OBS (Release)
-          shell: pwsh
-          run: |
-            $ErrorActionPreference = "Stop"
+          $arch = "x86_64"
+          $staging = "libobs-prebuilt-windows-$arch"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
   
-            $env:VCPKG_INSTALLATION_ROOT = $env:VCPKG_ROOT
-            $env:VCPKG_TOOLCHAIN_FILE = Join-Path $env:VCPKG_ROOT "scripts\buildsystems\vcpkg.cmake"
+          New-Item -ItemType Directory -Force -Path "$staging\target-release" | Out-Null
+          Copy-Item -Recurse -Force "target\release\*" "$staging\target-release\"
   
-            cargo build --release
+          "REVO_OBS_REF=$env:REVO_OBS_REF" | Out-File -Append -Encoding ascii "$staging\build-info.env"
+          "BUILD_DATE=$(Get-Date -AsUTC -Format o)" | Out-File -Append -Encoding ascii "$staging\build-info.env"
+          "ARCH=$arch" | Out-File -Append -Encoding ascii "$staging\build-info.env"
   
-        - name: Package artifact (basic)
-          shell: pwsh
-          run: |
-            $ErrorActionPreference = "Stop"
+          "STAGING=$staging" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
   
-            $arch = "x86_64"
-            $staging = "libobs-prebuilt-windows-$arch"
-            New-Item -ItemType Directory -Force -Path $staging | Out-Null
-  
-            New-Item -ItemType Directory -Force -Path "$staging\target-release" | Out-Null
-            Copy-Item -Recurse -Force "target\release\*" "$staging\target-release\"
-  
-            "REVO_OBS_REF=$env:REVO_OBS_REF" | Out-File -Append -Encoding ascii "$staging\build-info.env"
-            "BUILD_DATE=$(Get-Date -AsUTC -Format o)" | Out-File -Append -Encoding ascii "$staging\build-info.env"
-            "ARCH=$arch" | Out-File -Append -Encoding ascii "$staging\build-info.env"
-  
-            "STAGING=$staging" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
