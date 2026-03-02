@@ -142,7 +142,7 @@ jobs:
           # Re-sign after modifications
           codesign --force --sign - "${FW_DIR}" || true
 
-      - name: CALCULATED BUNDLE SIZE (system deps referenced by obs.framework)
+            - name: CALCULATED BUNDLE SIZE (system deps referenced by obs.framework)
         shell: bash
         run: |
           set -euo pipefail
@@ -203,22 +203,25 @@ jobs:
           grep -E '^(/System/|/usr/lib/)' "${DEPS_FILE}" > "${APPLE_FILE}" || true
 
           sum_sizes () {
-            python3 -c 'import os,sys
-            total=0
-            missing=[]
-            for line in sys.stdin:
-              p=line.strip()
+            python3 - <<'PY'
+          import os, sys
+          total = 0
+          missing = []
+          for line in sys.stdin:
+              p = line.strip()
               if not p:
-                continue
+                  continue
               if os.path.exists(p):
-                total += os.path.getsize(p)
+                  total += os.path.getsize(p)
               else:
-                missing.append(p)
-            print(f"{total/1024/1024:.2f} MB")
-            if missing:
+                  missing.append(p)
+          
+          print(f"{total/1024/1024:.2f} MB")
+          if missing:
               print("Missing on runner:")
               for m in missing:
-                print(f" - {m}")'
+                  print(f" - {m}")
+          PY
           }
 
           echo "[FFMPEG DEPS]"
@@ -255,7 +258,6 @@ jobs:
           echo "If you want a portable .app/.dmg, you must vendor anything under /usr/local/opt or /opt/homebrew/opt into the app bundle and rewrite install names to @rpath/@loader_path."
 
           rm -f "${DEPS_FILE}" "${FFMPEG_FILE}" "${OTHER_BREW_FILE}" "${APPLE_FILE}"
-
       - name: Upload libobs prebuilt artifact
         uses: actions/upload-artifact@v4
         with:
