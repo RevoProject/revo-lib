@@ -304,29 +304,22 @@ jobs:
   
           & $vcpkgExe version
   
-      - name: Install dependencies (vcpkg manifest + baseline, Release only)
+      - name: Install dependencies (vcpkg manifest + local baseline, Release only)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
-  
-          # 1) vcpkg registry/baseline configuration (required by this vcpkg instance)
-          @'
-          {
-            "default-registry": {
-              "kind": "git",
-              "repository": "https://github.com/microsoft/vcpkg",
-              "baseline": "a2b1f9c0d5d3f8c8b6f1a0d9d6a2c4e4c2f7b123"
-            }
-          }
-          '@ | Out-File -Encoding utf8 -NoNewline .\vcpkg-configuration.json
-  
-          # 2) Manifest with builtin-baseline as well (some setups require it explicitly)
-          @'
+      
+          # Determine a valid baseline commit from the local vcpkg checkout (guaranteed to exist)
+          $baseline = (git -C $env:VCPKG_ROOT rev-parse HEAD).Trim()
+          if (-not $baseline) { throw "Failed to determine vcpkg baseline (git rev-parse HEAD returned empty)." }
+          Write-Host "Using vcpkg builtin-baseline: $baseline"
+      
+          @"
           {
             "name": "revo-lib-ci",
             "version-string": "0.0.0",
-            "builtin-baseline": "a2b1f9c0d5d3f8c8b6f1a0d9d6a2c4e4c2f7b123",
+            "builtin-baseline": "$baseline",
             "dependencies": [
               "ffmpeg",
               "mbedtls",
@@ -336,8 +329,8 @@ jobs:
               "simde"
             ]
           }
-          '@ | Out-File -Encoding utf8 -NoNewline .\vcpkg.json
-  
+          "@ | Out-File -Encoding utf8 -NoNewline .\vcpkg.json
+      
           & $vcpkgExe install --triplet $env:VCPKG_DEFAULT_TRIPLET
   
       - name: Build (revo-lib) + build.rs builds OBS (Release)
