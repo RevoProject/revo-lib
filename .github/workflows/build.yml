@@ -6,7 +6,7 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  build-macos:
     runs-on: macos-15-intel
 
     env:
@@ -141,6 +141,7 @@ jobs:
 
           # Re-sign after modifications
           codesign --force --sign - "${FW_DIR}" || true
+
       - name: CALCULATED BUNDLE SIZE (system deps referenced by obs.framework)
         shell: bash
         run: |
@@ -246,4 +247,74 @@ jobs:
         with:
           name: ${{ env.STAGING }}
           path: ${{ env.STAGING }}/
+          if-no-files-found: error
+
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-2022
+
+    env:
+      RUST_BACKTRACE: "1"
+      REVO_OBS_REF: "32.1.0-rc1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install dependencies (vcpkg)
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg $env:VCPKG_INSTALLATION_ROOT
+          cd $env:VCPKG_INSTALLATION_ROOT
+          .\bootstrap-vcpkg.bat
+
+          # Zależności typowe dla OBS/libobs; możesz dostosować pod to co faktycznie pobiera build.rs/CMake w tym repo.
+          .\vcpkg.exe install `
+            ffmpeg:x64-windows `
+            mbedtls:x64-windows `
+            speexdsp:x64-windows `
+            jansson:x64-windows `
+            uthash:x64-windows `
+            simde:x64-windows
+
+      - name: Build (revo-lib) + build.rs builds OBS
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo build --release
+
+      - name: Package artifact (basic)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $arch = "x86_64"
+          $staging = "libobs-prebuilt-windows-$arch"
+          New-Item -ItemType Directory -Force -Path "$staging" | Out-Null
+
+          # Tu możesz dopasować layout do tego, co Windows build faktycznie produkuje w tym repo.
+          # Na start wrzucamy całość target/release (żeby mieć output), a potem doprecyzujesz.
+          New-Item -ItemType Directory -Force -Path "$staging\target-release" | Out-Null
+          Copy-Item -Recurse -Force "target\release\*" "$staging\target-release\"
+
+          "REVO_OBS_REF=$env:REVO_OBS_REF" | Out-File -Append -Encoding ascii "$staging\build-info.env"
+          "BUILD_DATE=$(Get-Date -AsUTC -Format o)" | Out-File -Append -Encoding ascii "$staging\build-info.env"
+          "ARCH=$arch" | Out-File -Append -Encoding ascii "$staging\build-info.env"
+
+          echo "STAGING=$staging" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.STAGING }}
+          path: ${{ env.STAGING }}\
           if-no-files-found: error
