@@ -118,10 +118,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          FW_BIN="${{ env.STAGING }}/framework/obs.framework/obs"
+          FW_DIR="${{ env.STAGING }}/framework/obs.framework"
+
+          # Ensure the binary name matches what build.rs links: framework=obs
+          # (create a symlink obs -> libobs)
+          if [ -f "${FW_DIR}/libobs" ] && [ ! -e "${FW_DIR}/obs" ]; then
+            ln -sf "libobs" "${FW_DIR}/obs"
+          fi
+
+          FW_BIN="${{ env.STAGING }}/framework/obs.framework/libobs"
           if [ ! -f "${FW_BIN}" ]; then
             echo "ERROR: framework binary not found: ${FW_BIN}" >&2
-            find "${{ env.STAGING }}/framework" -maxdepth 4 -print || true
+            find "${{ env.STAGING }}/framework/obs.framework" -maxdepth 4 -print || true
             exit 1
           fi
 
@@ -129,10 +137,9 @@ jobs:
           otool -D "${FW_BIN}" || true
           otool -L "${FW_BIN}" || true
 
-          # Make it @rpath-friendly
-          install_name_tool -id "@rpath/obs.framework/obs" "${FW_BIN}"
+          # Ustaw install-name na @rpath dla binarki libobs w obs.framework
+          install_name_tool -id "@rpath/obs.framework/libobs" "${FW_BIN}"
 
-          # Ad-hoc codesign after modifications
           codesign --force --sign - "${{ env.STAGING }}/framework/obs.framework" || true
 
           echo "After patch:"
