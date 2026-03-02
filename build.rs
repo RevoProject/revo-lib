@@ -275,6 +275,37 @@ fn main() -> Result<(), Box<dyn Error>> {
             fs::write(&buildspec_win, "# PATCHED: no-op, deps provided by vcpkg\n")?;
         }
 
+        // Patch windows/architecture.cmake.
+        //
+        // This file was designed for Visual Studio multi-generator workflows:
+        //   1. It uses CMAKE_VS_PLATFORM_NAME (always empty with Ninja) to detect the
+        //      architecture – producing a FATAL_ERROR when the variable is unset.
+        //   2. It kicks off companion x86 / ARM64 sub-builds via execute_process -A.
+        //   3. When OBS_PARENT_ARCHITECTURE != CMAKE_VS_PLATFORM_NAME it falls into a
+        //      "child-build stub" else-branch that unconditionally adds win-capture /
+        //      virtualcam subdirectories and then returns – completely wrong for a
+        //      headless Ninja build.
+        //
+        // Replacing it with a minimal stub is the same strategy used for
+        // compilerconfig.cmake and buildspec.cmake.  All we need: set
+        // OBS_PARENT_ARCHITECTURE so downstream cmake logic that queries it works.
+        println!("cargo:warning=Step: patch windows/architecture.cmake");
+        let win_architecture = obs_src.join("cmake/windows/architecture.cmake");
+        if win_architecture.exists() {
+            println!("cargo:warning=Replacing windows/architecture.cmake with Ninja-compatible stub");
+            fs::write(
+                &win_architecture,
+                "# PATCHED: minimal Ninja-compatible stub (no VS multi-arch sub-builds)\n\
+                 include_guard(GLOBAL)\n\
+                 if(NOT DEFINED OBS_PARENT_ARCHITECTURE)\n\
+                   set(OBS_PARENT_ARCHITECTURE \"x64\")\n\
+                 endif()\n\
+                 message(STATUS \"OBS_PARENT_ARCHITECTURE=${OBS_PARENT_ARCHITECTURE}\")\n",
+            )?;
+        } else {
+            println!("cargo:warning=windows/architecture.cmake not found, skipping");
+        }
+
         // Windows SDK version: prefer CMAKE_SYSTEM_VERSION env var (set by workflow)
         let sdk_ver = env::var("CMAKE_SYSTEM_VERSION")
             .unwrap_or_else(|_| "10.0.20348.0".to_string());
