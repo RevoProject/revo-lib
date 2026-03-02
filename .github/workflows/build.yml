@@ -182,8 +182,6 @@ jobs:
           OTHER_BREW_FILE="$(mktemp)"
           APPLE_FILE="$(mktemp)"
 
-          # Extract dylib paths (first column), skip @rpath/@loader_path/@executable_path
-          # Keep only absolute paths so we can size them on runner.
           otool -L "${FW_BIN}" \
             | tail -n +2 \
             | awk '{print $1}' \
@@ -199,31 +197,28 @@ jobs:
           fi
           echo
 
-          # Split into groups
           grep -E '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' "${DEPS_FILE}" > "${FFMPEG_FILE}" || true
           grep -E '^(/usr/local/opt|/opt/homebrew/opt)/' "${DEPS_FILE}" \
             | grep -vE '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' > "${OTHER_BREW_FILE}" || true
           grep -E '^(/System/|/usr/lib/)' "${DEPS_FILE}" > "${APPLE_FILE}" || true
 
           sum_sizes () {
-            python3 - << 'PY'
-            import os, sys
-            total = 0
-            missing = []
+            python3 -c 'import os,sys
+            total=0
+            missing=[]
             for line in sys.stdin:
-                p = line.strip()
-                if not p:
-                    continue
-                if os.path.exists(p):
-                    total += os.path.getsize(p)
-                else:
-                    missing.append(p)
+              p=line.strip()
+              if not p:
+                continue
+              if os.path.exists(p):
+                total += os.path.getsize(p)
+              else:
+                missing.append(p)
             print(f"{total/1024/1024:.2f} MB")
             if missing:
-                print("Missing on runner:")
-                for m in missing:
-                    print(f" - {m}")
-            PY
+              print("Missing on runner:")
+              for m in missing:
+                print(f" - {m}")'
           }
 
           echo "[FFMPEG DEPS]"
@@ -260,7 +255,7 @@ jobs:
           echo "If you want a portable .app/.dmg, you must vendor anything under /usr/local/opt or /opt/homebrew/opt into the app bundle and rewrite install names to @rpath/@loader_path."
 
           rm -f "${DEPS_FILE}" "${FFMPEG_FILE}" "${OTHER_BREW_FILE}" "${APPLE_FILE}"
-          
+
       - name: Upload libobs prebuilt artifact
         uses: actions/upload-artifact@v4
         with:
