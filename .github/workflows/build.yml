@@ -258,6 +258,15 @@ jobs:
       RUST_BACKTRACE: "1"
       REVO_OBS_REF: "32.1.0-rc1"
 
+      # Prefer Release everywhere
+      CMAKE_BUILD_TYPE: "Release"
+      # If CMake respects it in this build
+      CMAKE_MSVC_RUNTIME_LIBRARY: "MultiThreadedDLL"
+
+      # vcpkg settings
+      VCPKG_DEFAULT_TRIPLET: "x64-windows-release"
+      VCPKG_ROOT: "C:\\vcpkg"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -272,46 +281,48 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install dependencies (vcpkg)
+      - name: Ensure vcpkg exists
         shell: pwsh
         run: |
-          if (-not $env:VCPKG_INSTALLATION_ROOT -or $env:VCPKG_INSTALLATION_ROOT.Trim() -eq "") {
-            $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
+          $ErrorActionPreference = "Stop"
+
+          if (-not (Test-Path $env:VCPKG_ROOT)) {
+            throw "Expected vcpkg at $env:VCPKG_ROOT but it does not exist on this runner."
           }
 
-          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
-          Write-Host "Using vcpkg root: $vcpkgRoot"
-          if (-not (Test-Path $vcpkgRoot)) {
-            throw "vcpkg root does not exist: $vcpkgRoot"
-          }
-
-          # Prefer vcpkg.exe if it exists; otherwise bootstrap.
-          $vcpkgExe = Join-Path $vcpkgRoot "vcpkg.exe"
+          $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
           if (-not (Test-Path $vcpkgExe)) {
-            Write-Host "vcpkg.exe not found, bootstrapping..."
-            Push-Location $vcpkgRoot
+            Write-Host "vcpkg.exe not found, bootstrapping (may download vcpkg-tool)..."
+            Push-Location $env:VCPKG_ROOT
             .\bootstrap-vcpkg.bat
             Pop-Location
           }
 
           & $vcpkgExe version
 
-          # Install deps (adjust as needed)
-          & $vcpkgExe install `
-            ffmpeg:x64-windows `
-            mbedtls:x64-windows `
-            speexdsp:x64-windows `
-            jansson:x64-windows `
-            uthash:x64-windows `
-            simde:x64-windows
-
-      - name: Build (revo-lib) + build.rs builds OBS
+      - name: Install dependencies (vcpkg, Release only)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
-          $env:VCPKG_DEFAULT_TRIPLET = "x64-windows"
-          $env:VCPKG_FEATURE_FLAGS = "manifests"
+          $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
+
+          # Force Release triplet to avoid building debug ffmpeg/etc.
+          & $vcpkgExe install --triplet $env:VCPKG_DEFAULT_TRIPLET `
+            ffmpeg `
+            mbedtls `
+            speexdsp `
+            jansson `
+            uthash `
+            simde
+
+      - name: Build (revo-lib) + build.rs builds OBS (Release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # Help CMake find vcpkg toolchain in case build.rs uses CMake under the hood
+          $env:VCPKG_INSTALLATION_ROOT = $env:VCPKG_ROOT
+          $env:VCPKG_TOOLCHAIN_FILE = Join-Path $env:VCPKG_ROOT "scripts\buildsystems\vcpkg.cmake"
 
           cargo build --release
 
@@ -319,18 +330,21 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+
           $arch = "x86_64"
           $staging = "libobs-prebuilt-windows-$arch"
-          New-Item -ItemType Directory -Force -Path "$staging" | Out-Null
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
+          # Minimal: pack Rust outputs (you can refine once you know where OBS install lands on Windows)
           New-Item -ItemType Directory -Force -Path "$staging\target-release" | Out-Null
           Copy-Item -Recurse -Force "target\release\*" "$staging\target-release\"
 
           "REVO_OBS_REF=$env:REVO_OBS_REF" | Out-File -Append -Encoding ascii "$staging\build-info.env"
           "BUILD_DATE=$(Get-Date -AsUTC -Format o)" | Out-File -Append -Encoding ascii "$staging\build-info.env"
           "ARCH=$arch" | Out-File -Append -Encoding ascii "$staging\build-info.env"
+          "VCPKG_DEFAULT_TRIPLET=$env:VCPKG_DEFAULT_TRIPLET" | Out-File -Append -Encoding ascii "$staging\build-info.env"
 
-          echo "STAGING=$staging" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "STAGING=$staging" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
