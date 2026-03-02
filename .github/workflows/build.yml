@@ -274,12 +274,32 @@ jobs:
       - name: Install dependencies (vcpkg)
         shell: pwsh
         run: |
-          git clone https://github.com/microsoft/vcpkg $env:VCPKG_INSTALLATION_ROOT
-          cd $env:VCPKG_INSTALLATION_ROOT
-          .\bootstrap-vcpkg.bat
+          # GitHub-hosted runners często mają już C:\vcpkg (VCPKG_INSTALLATION_ROOT) przygotowane.
+          # Nie klonuj drugi raz. Zamiast tego: użyj istniejącego i tylko zbootstrappuj jeśli trzeba.
 
-          # Zależności typowe dla OBS/libobs; możesz dostosować pod to co faktycznie pobiera build.rs/CMake w tym repo.
-          .\vcpkg.exe install `
+          if (-not $env:VCPKG_INSTALLATION_ROOT -or $env:VCPKG_INSTALLATION_ROOT.Trim() -eq "") {
+            $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
+          }
+
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          Write-Host "Using vcpkg root: $vcpkgRoot"
+          if (-not (Test-Path $vcpkgRoot)) {
+            throw "vcpkg root does not exist: $vcpkgRoot"
+          }
+
+          # Prefer vcpkg.exe if it exists; otherwise bootstrap.
+          $vcpkgExe = Join-Path $vcpkgRoot "vcpkg.exe"
+          if (-not (Test-Path $vcpkgExe)) {
+            Write-Host "vcpkg.exe not found, bootstrapping..."
+            Push-Location $vcpkgRoot
+            .\bootstrap-vcpkg.bat
+            Pop-Location
+          }
+
+          & $vcpkgExe version
+
+          # Install deps (adjust as needed)
+          & $vcpkgExe install `
             ffmpeg:x64-windows `
             mbedtls:x64-windows `
             speexdsp:x64-windows `
@@ -291,6 +311,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+
+          # Jeśli build.rs/CMake korzysta z vcpkg, często wymagane są te env:
+          # (nie zaszkodzi nawet jeśli nieużywane)
+          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+          $env:VCPKG_DEFAULT_TRIPLET = "x64-windows"
+          $env:VCPKG_FEATURE_FLAGS = "manifests"
+
           cargo build --release
 
       - name: Package artifact (basic)
@@ -301,8 +328,6 @@ jobs:
           $staging = "libobs-prebuilt-windows-$arch"
           New-Item -ItemType Directory -Force -Path "$staging" | Out-Null
 
-          # Tu możesz dopasować layout do tego, co Windows build faktycznie produkuje w tym repo.
-          # Na start wrzucamy całość target/release (żeby mieć output), a potem doprecyzujesz.
           New-Item -ItemType Directory -Force -Path "$staging\target-release" | Out-Null
           Copy-Item -Recurse -Force "target\release\*" "$staging\target-release\"
 
