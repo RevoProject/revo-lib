@@ -196,4 +196,3 @@ jobs:
           name: ${{ env.STAGING }}
           path: ${{ env.STAGING }}/
           if-no-files-found: error
-          if-no-files-found: error
