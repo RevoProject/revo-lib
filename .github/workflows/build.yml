@@ -142,7 +142,7 @@ jobs:
           # Re-sign after modifications
           codesign --force --sign - "${FW_DIR}" || true
 
-      - name: CALCULATE BUNDLE SIZE (system deps referenced by obs.framework)
+            - name: CALCULATED BUNDLE SIZE (system deps referenced by obs.framework)
         shell: bash
         run: |
           set -euo pipefail
@@ -150,7 +150,6 @@ jobs:
           STAGING="${{ env.STAGING }}"
           FW_DIR="${STAGING}/framework/obs.framework"
 
-          # Prefer "obs" if present, else use "libobs"
           if [ -f "${FW_DIR}/obs" ]; then
             FW_BIN="${FW_DIR}/obs"
           else
@@ -178,23 +177,33 @@ jobs:
           du -sh "${FW_DIR}" || true
           echo
 
+          DEPS_FILE="$(mktemp)"
+          FFMPEG_FILE="$(mktemp)"
+          OTHER_BREW_FILE="$(mktemp)"
+          APPLE_FILE="$(mktemp)"
+
+          # Extract dylib paths (first column), skip @rpath/@loader_path/@executable_path
+          # Keep only absolute paths so we can size them on runner.
+          otool -L "${FW_BIN}" \
+            | tail -n +2 \
+            | awk '{print $1}' \
+            | grep -vE '^(@rpath|@loader_path|@executable_path)' \
+            | grep -E '^/' \
+            | sort -u > "${DEPS_FILE}" || true
+
           echo "[DEPENDENCIES FROM otool -L]"
-          mapfile -t DEPS < <(
-            otool -L "${FW_BIN}" \
-              | tail -n +2 \
-              | awk '{print $1}' \
-              | grep -vE '^(@rpath|@loader_path|@executable_path)' \
-              | grep -vE "^${FW_BIN}$" \
-              | sort -u
-          )
-
-          if [ "${#DEPS[@]}" -eq 0 ]; then
-            echo "No deps found via otool -L (unexpected)."
-            exit 0
+          if [ ! -s "${DEPS_FILE}" ]; then
+            echo "(none)"
+          else
+            sed 's/^/ - /' "${DEPS_FILE}"
           fi
-
-          printf '%s\n' "${DEPS[@]}" | sed 's/^/ - /'
           echo
+
+          # Split into groups
+          grep -E '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' "${DEPS_FILE}" > "${FFMPEG_FILE}" || true
+          grep -E '^(/usr/local/opt|/opt/homebrew/opt)/' "${DEPS_FILE}" \
+            | grep -vE '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' > "${OTHER_BREW_FILE}" || true
+          grep -E '^(/System/|/usr/lib/)' "${DEPS_FILE}" > "${APPLE_FILE}" || true
 
           sum_sizes () {
             python3 - << 'PY'
@@ -217,27 +226,41 @@ jobs:
             PY
           }
 
-          echo "[FFMPEG DEPS (/usr/local/opt/ffmpeg or /opt/homebrew/opt/ffmpeg)]"
-          printf '%s\n' "${DEPS[@]}" | grep -E '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' || echo "(none)"
+          echo "[FFMPEG DEPS]"
+          if [ ! -s "${FFMPEG_FILE}" ]; then
+            echo "(none)"
+          else
+            sed 's/^/ - /' "${FFMPEG_FILE}"
+          fi
           echo -n "FFmpeg total size on runner: "
-          printf '%s\n' "${DEPS[@]}" | grep -E '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' | sum_sizes
+          cat "${FFMPEG_FILE}" | sum_sizes
           echo
 
-          echo "[OTHER HOMEBREW DEPS (/usr/local/opt or /opt/homebrew/opt)]"
-          printf '%s\n' "${DEPS[@]}" | grep -E '^(/usr/local/opt|/opt/homebrew/opt)/' | grep -vE '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' || echo "(none)"
+          echo "[OTHER HOMEBREW DEPS]"
+          if [ ! -s "${OTHER_BREW_FILE}" ]; then
+            echo "(none)"
+          else
+            sed 's/^/ - /' "${OTHER_BREW_FILE}"
+          fi
           echo -n "Other Homebrew total size on runner: "
-          printf '%s\n' "${DEPS[@]}" | grep -E '^(/usr/local/opt|/opt/homebrew/opt)/' | grep -vE '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' | sum_sizes
+          cat "${OTHER_BREW_FILE}" | sum_sizes
           echo
 
-          echo "[APPLE SYSTEM DEPS (/System, /usr/lib)]"
-          printf '%s\n' "${DEPS[@]}" | grep -E '^(/System/|/usr/lib/)' || echo "(none)"
+          echo "[APPLE SYSTEM DEPS]"
+          if [ ! -s "${APPLE_FILE}" ]; then
+            echo "(none)"
+          else
+            sed 's/^/ - /' "${APPLE_FILE}"
+          fi
           echo -n "Apple system deps total size on runner: "
-          printf '%s\n' "${DEPS[@]}" | grep -E '^(/System/|/usr/lib/)' | sum_sizes
+          cat "${APPLE_FILE}" | sum_sizes
           echo
 
           echo "[SUMMARY]"
           echo "If you want a portable .app/.dmg, you must vendor anything under /usr/local/opt or /opt/homebrew/opt into the app bundle and rewrite install names to @rpath/@loader_path."
 
+          rm -f "${DEPS_FILE}" "${FFMPEG_FILE}" "${OTHER_BREW_FILE}" "${APPLE_FILE}"
+          
       - name: Upload libobs prebuilt artifact
         uses: actions/upload-artifact@v4
         with:
