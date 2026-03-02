@@ -142,7 +142,7 @@ jobs:
           # Re-sign after modifications
           codesign --force --sign - "${FW_DIR}" || true
 
-            - name: CALCULATED BUNDLE SIZE (system deps referenced by obs.framework)
+      - name: CALCULATED BUNDLE SIZE (system deps referenced by obs.framework)
         shell: bash
         run: |
           set -euo pipefail
