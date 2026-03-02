@@ -7,6 +7,7 @@ on:
 
 jobs:
   build-macos:
+    name: Build (macOS)
     runs-on: macos-15-intel
 
     env:
@@ -274,9 +275,6 @@ jobs:
       - name: Install dependencies (vcpkg)
         shell: pwsh
         run: |
-          # GitHub-hosted runners często mają już C:\vcpkg (VCPKG_INSTALLATION_ROOT) przygotowane.
-          # Nie klonuj drugi raz. Zamiast tego: użyj istniejącego i tylko zbootstrappuj jeśli trzeba.
-
           if (-not $env:VCPKG_INSTALLATION_ROOT -or $env:VCPKG_INSTALLATION_ROOT.Trim() -eq "") {
             $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
           }
@@ -311,9 +309,6 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
-          # Jeśli build.rs/CMake korzysta z vcpkg, często wymagane są te env:
-          # (nie zaszkodzi nawet jeśli nieużywane)
           $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
           $env:VCPKG_DEFAULT_TRIPLET = "x64-windows"
           $env:VCPKG_FEATURE_FLAGS = "manifests"
