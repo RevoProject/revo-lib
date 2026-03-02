@@ -20,6 +20,29 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Debug checkout tree + build.rs expectations
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== Repo root ==="
+          ls -la
+
+          echo "=== .gitmodules (if any) ==="
+          if [ -f .gitmodules ]; then
+            cat .gitmodules
+          else
+            echo "No .gitmodules"
+          fi
+
+          echo "=== Submodules status ==="
+          git submodule status --recursive || true
+
+          echo "=== build.rs files ==="
+          find . -maxdepth 6 -name build.rs -print || true
+
+          echo "=== env vars referenced by build.rs ==="
+          rg -n 'env::var\("([^"]+)"\)|std::env::var\("([^"]+)"\)' -S . || true
+
       - name: Install dependencies
         run: |
           brew update
@@ -60,12 +83,24 @@ jobs:
             exit 1
           fi
 
-      - name: Build
+      - name: Copy libobs.framework into ./framework
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf framework
+          mkdir -p framework
+          cp -R "$(find obs-libobs/obs-studio/build-headless -type d -name libobs.framework -print -quit)" framework/
+          ls -la framework/libobs.framework
+          echo "Framework binary:"
+          ls -la framework/libobs.framework/libobs || true
+
+      - name: Build (revo-lib)
         run: cargo build --release
         env:
           RUST_BACKTRACE: 1
 
       - name: Package libobs prebuilt artifact
+        shell: bash
         run: |
           set -euo pipefail
           ARCH=$(uname -m)
@@ -77,7 +112,6 @@ jobs:
           mkdir -p "${STAGING}/include/obs"
           mkdir -p "${STAGING}/bindings"
 
-          # ── 1. The compiled macOS framework ─────────────────────────────────
           FRAMEWORK_SRC="$(find "${BUILD_DIR}" -type d -name "libobs.framework" -print -quit || true)"
           if [ -n "${FRAMEWORK_SRC}" ] && [ -d "${FRAMEWORK_SRC}" ]; then
             cp -R "${FRAMEWORK_SRC}" "${STAGING}/framework/"
@@ -88,10 +122,8 @@ jobs:
             exit 1
           fi
 
-          # ── 2. Public headers from OBS source tree ───────────────────────────
           cp "${OBS_SRC}/libobs/"*.h "${STAGING}/include/obs/" 2>/dev/null || true
 
-          # ── 3. Generated obsconfig.h (cmake output, has version defines) ────
           if [ -f "${BUILD_DIR}/config/obsconfig.h" ]; then
             cp "${BUILD_DIR}/config/obsconfig.h" "${STAGING}/include/obs/"
             echo "Copied obsconfig.h"
@@ -99,7 +131,6 @@ jobs:
             echo "WARNING: obsconfig.h not found" >&2
           fi
 
-          # ── 4. Pre-generated Rust FFI bindings ───────────────────────────────
           BINDINGS=$(find target -name "libobs_bindings.rs" 2>/dev/null | head -1 || true)
           if [ -n "$BINDINGS" ]; then
             cp "$BINDINGS" "${STAGING}/bindings/libobs_bindings.rs"
@@ -109,10 +140,9 @@ jobs:
             exit 1
           fi
 
-          # ── 5. Metadata ──────────────────────────────────────────────────────
           echo "OBS_REF=$(git -C ${OBS_SRC} describe --tags --always 2>/dev/null || echo unknown)" >> "${STAGING}/build-info.env"
           echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${STAGING}/build-info.env"
-          echo "ARCH=${ARCH}"                                >> "${STAGING}/build-info.env"
+          echo "ARCH=${ARCH}" >> "${STAGING}/build-info.env"
           echo "MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}" >> "${STAGING}/build-info.env"
 
           echo "Artifact layout:"
@@ -120,15 +150,25 @@ jobs:
 
           echo "STAGING=${STAGING}" >> "$GITHUB_ENV"
 
+      - name: Ensure STAGING is set
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${{ env.STAGING }}" ]; then
+            echo "ERROR: env.STAGING is empty (previous step did not export it)" >&2
+            exit 1
+          fi
+          echo "STAGING=${{ env.STAGING }}"
+
       - name: Patch framework install names (make artifact portable)
         shell: bash
         run: |
           set -euo pipefail
 
-          FW_BIN="${STAGING}/framework/libobs.framework/libobs"
+          FW_BIN="${{ env.STAGING }}/framework/libobs.framework/libobs"
           if [ ! -f "${FW_BIN}" ]; then
             echo "ERROR: framework binary not found: ${FW_BIN}" >&2
-            find "${STAGING}/framework" -maxdepth 4 -print || true
+            find "${{ env.STAGING }}/framework" -maxdepth 4 -print || true
             exit 1
           fi
 
@@ -144,7 +184,7 @@ jobs:
             install_name_tool -change "${ABS_REF}" "@rpath/libobs.framework/libobs" "${FW_BIN}"
           fi
 
-          codesign --force --sign - "${STAGING}/framework/libobs.framework" || true
+          codesign --force --sign - "${{ env.STAGING }}/framework/libobs.framework" || true
 
           echo "After patch:"
           otool -D "${FW_BIN}" || true
@@ -155,4 +195,5 @@ jobs:
         with:
           name: ${{ env.STAGING }}
           path: ${{ env.STAGING }}/
+          if-no-files-found: error
           if-no-files-found: error
