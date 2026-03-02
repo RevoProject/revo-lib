@@ -305,19 +305,30 @@ jobs:
 
           & $vcpkgExe version
 
-      - name: Install dependencies (vcpkg, Release only)
+      - name: Install dependencies (vcpkg manifest, Release only)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
 
-          & $vcpkgExe install --triplet $env:VCPKG_DEFAULT_TRIPLET `
-            ffmpeg `
-            mbedtls `
-            speexdsp `
-            jansson `
-            uthash `
-            simde
+          # Create a local vcpkg manifest for this workflow run
+          @'
+          {
+            "name": "revo-lib-ci",
+            "version-string": "0.0.0",
+            "dependencies": [
+              "ffmpeg",
+              "mbedtls",
+              "speexdsp",
+              "jansson",
+              "uthash",
+              "simde"
+            ]
+          }
+          '@ | Out-File -Encoding utf8 -NoNewline .\vcpkg.json
+
+          # Install deps from the manifest (Release triplet only)
+          & $vcpkgExe install --triplet $env:VCPKG_DEFAULT_TRIPLET
 
       - name: Build (revo-lib) + build.rs builds OBS (Release)
         shell: pwsh
