@@ -25,17 +25,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # Zależności: build.rs i tak próbuje brew install, ale robimy to tu, żeby log był czytelniejszy
       - name: Install dependencies
         run: |
           brew update
           brew install simde ffmpeg mbedtls speexdsp uthash jansson cmake ninja pkg-config
 
-      # Najważniejsze: to wywołuje build.rs, który:
-      # - klonuje obs-studio do obs-libobs/obs-studio (jeśli brak)
-      # - buduje w obs-libobs/obs-studio/build-headless
-      # - instaluje do obs-libobs/obs-studio/build-headless/install
-      # - generuje bindings do OUT_DIR (target/**/out/libobs_bindings.rs)
       - name: Build (revo-lib) + build.rs builds OBS
         shell: bash
         run: |
@@ -59,8 +53,6 @@ jobs:
           mkdir -p "${STAGING}/bindings"
 
           # 1) Framework
-          # OBS build should have produced libobs.framework somewhere under BUILD_DIR.
-          # build.rs (prebuilt mode) expects framework named "obs" (framework=obs).
           FW_DIR="$(find "${BUILD_DIR}" -type d -name "libobs.framework" -print -quit || true)"
           if [ -z "${FW_DIR}" ]; then
             echo "ERROR: libobs.framework not found under ${BUILD_DIR}" >&2
@@ -73,9 +65,12 @@ jobs:
           cp -R "${FW_DIR}" "${STAGING}/framework/obs.framework"
           echo "Copied framework: ${FW_DIR} -> ${STAGING}/framework/obs.framework"
 
+          # Ensure the binary name matches what build.rs links: framework=obs
+          if [ -f "${STAGING}/framework/obs.framework/libobs" ] && [ ! -e "${STAGING}/framework/obs.framework/obs" ]; then
+            ln -sf "libobs" "${STAGING}/framework/obs.framework/obs"
+          fi
+
           # 2) Headers
-          # build.rs expects <prebuilt>/include/ ... public headers
-          # We'll include both installed headers (preferred) and fallback source headers.
           if [ -d "${INSTALL_PREFIX}/include/obs" ]; then
             cp -R "${INSTALL_PREFIX}/include/obs/." "${STAGING}/include/obs/"
             echo "Copied installed headers from ${INSTALL_PREFIX}/include/obs"
@@ -91,7 +86,6 @@ jobs:
           fi
 
           # 3) Bindings (pre-generated)
-          # build.rs in prebuilt mode requires: bindings/libobs_bindings.rs
           BINDINGS="$(find target -path "*/out/libobs_bindings.rs" -print -quit || true)"
           if [ -z "${BINDINGS}" ]; then
             echo "ERROR: libobs_bindings.rs not found in target/**/out/" >&2
@@ -120,34 +114,129 @@ jobs:
 
           FW_DIR="${{ env.STAGING }}/framework/obs.framework"
 
-          # Ensure the binary name matches what build.rs links: framework=obs
-          # (create a symlink obs -> libobs)
+          # If obs doesn't exist for some reason, create it now
           if [ -f "${FW_DIR}/libobs" ] && [ ! -e "${FW_DIR}/obs" ]; then
             ln -sf "libobs" "${FW_DIR}/obs"
           fi
 
-          FW_BIN="${{ env.STAGING }}/framework/obs.framework/libobs"
+          # Patch BOTH names if present, so whichever the linker uses is consistent.
+          for FW_BIN in "${FW_DIR}/libobs" "${FW_DIR}/obs"; do
+            if [ -f "${FW_BIN}" ]; then
+              echo "== Patching: ${FW_BIN} =="
+              echo "Before:"
+              otool -D "${FW_BIN}" || true
+              otool -L "${FW_BIN}" || true
+
+              install_name_tool -id "@rpath/obs.framework/libobs" "${FW_BIN}"
+
+              echo "After:"
+              otool -D "${FW_BIN}" || true
+              otool -L "${FW_BIN}" || true
+
+              echo "== LC_BUILD_VERSION =="
+              otool -l "${FW_BIN}" | grep -A2 LC_BUILD_VERSION || true
+              echo
+            fi
+          done
+
+          # Re-sign after modifications
+          codesign --force --sign - "${FW_DIR}" || true
+
+      - name: CALCULATE BUNDLE SIZE (system deps referenced by obs.framework)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          STAGING="${{ env.STAGING }}"
+          FW_DIR="${STAGING}/framework/obs.framework"
+
+          # Prefer "obs" if present, else use "libobs"
+          if [ -f "${FW_DIR}/obs" ]; then
+            FW_BIN="${FW_DIR}/obs"
+          else
+            FW_BIN="${FW_DIR}/libobs"
+          fi
+
+          echo "=============================="
+          echo "CALCULATED BUNDLE SIZE (SYSTEM DEPS)"
+          echo "=============================="
+          echo "Framework dir: ${FW_DIR}"
+          echo "Framework bin: ${FW_BIN}"
+          echo
+
           if [ ! -f "${FW_BIN}" ]; then
-            echo "ERROR: framework binary not found: ${FW_BIN}" >&2
-            find "${{ env.STAGING }}/framework/obs.framework" -maxdepth 4 -print || true
+            echo "ERROR: Framework binary not found: ${FW_BIN}" >&2
+            find "${STAGING}/framework" -maxdepth 4 -print || true
             exit 1
           fi
 
-          echo "Before patch:"
-          otool -D "${FW_BIN}" || true
-          otool -L "${FW_BIN}" || true
+          echo "[STAGING TOTAL]"
+          du -sh "${STAGING}" || true
+          echo
 
-          # Ustaw install-name na @rpath dla binarki libobs w obs.framework
-          install_name_tool -id "@rpath/obs.framework/libobs" "${FW_BIN}"
+          echo "[FRAMEWORK TOTAL]"
+          du -sh "${FW_DIR}" || true
+          echo
 
-          codesign --force --sign - "${{ env.STAGING }}/framework/obs.framework" || true
+          echo "[DEPENDENCIES FROM otool -L]"
+          mapfile -t DEPS < <(
+            otool -L "${FW_BIN}" \
+              | tail -n +2 \
+              | awk '{print $1}' \
+              | grep -vE '^(@rpath|@loader_path|@executable_path)' \
+              | grep -vE "^${FW_BIN}$" \
+              | sort -u
+          )
 
-          echo "After patch:"
-          otool -D "${FW_BIN}" || true
-          otool -L "${FW_BIN}" || true
+          if [ "${#DEPS[@]}" -eq 0 ]; then
+            echo "No deps found via otool -L (unexpected)."
+            exit 0
+          fi
 
-          echo "== LC_BUILD_VERSION =="
-          otool -l "${FW_BIN}" | grep -A2 LC_BUILD_VERSION || true
+          printf '%s\n' "${DEPS[@]}" | sed 's/^/ - /'
+          echo
+
+          sum_sizes () {
+            python3 - << 'PY'
+            import os, sys
+            total = 0
+            missing = []
+            for line in sys.stdin:
+                p = line.strip()
+                if not p:
+                    continue
+                if os.path.exists(p):
+                    total += os.path.getsize(p)
+                else:
+                    missing.append(p)
+            print(f"{total/1024/1024:.2f} MB")
+            if missing:
+                print("Missing on runner:")
+                for m in missing:
+                    print(f" - {m}")
+            PY
+          }
+
+          echo "[FFMPEG DEPS (/usr/local/opt/ffmpeg or /opt/homebrew/opt/ffmpeg)]"
+          printf '%s\n' "${DEPS[@]}" | grep -E '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' || echo "(none)"
+          echo -n "FFmpeg total size on runner: "
+          printf '%s\n' "${DEPS[@]}" | grep -E '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' | sum_sizes
+          echo
+
+          echo "[OTHER HOMEBREW DEPS (/usr/local/opt or /opt/homebrew/opt)]"
+          printf '%s\n' "${DEPS[@]}" | grep -E '^(/usr/local/opt|/opt/homebrew/opt)/' | grep -vE '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' || echo "(none)"
+          echo -n "Other Homebrew total size on runner: "
+          printf '%s\n' "${DEPS[@]}" | grep -E '^(/usr/local/opt|/opt/homebrew/opt)/' | grep -vE '^(/usr/local/opt/ffmpeg|/opt/homebrew/opt/ffmpeg)/' | sum_sizes
+          echo
+
+          echo "[APPLE SYSTEM DEPS (/System, /usr/lib)]"
+          printf '%s\n' "${DEPS[@]}" | grep -E '^(/System/|/usr/lib/)' || echo "(none)"
+          echo -n "Apple system deps total size on runner: "
+          printf '%s\n' "${DEPS[@]}" | grep -E '^(/System/|/usr/lib/)' | sum_sizes
+          echo
+
+          echo "[SUMMARY]"
+          echo "If you want a portable .app/.dmg, you must vendor anything under /usr/local/opt or /opt/homebrew/opt into the app bundle and rewrite install names to @rpath/@loader_path."
 
       - name: Upload libobs prebuilt artifact
         uses: actions/upload-artifact@v4
