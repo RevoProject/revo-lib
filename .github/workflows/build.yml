@@ -257,13 +257,13 @@ jobs:
       RUST_BACKTRACE: "1"
       REVO_OBS_REF: "32.1.0-rc1"
   
-      # Force single-config generator so Release is consistent (fix Debug build + Release install mismatch)
-      CMAKE_GENERATOR: "Ninja"
-      CMAKE_BUILD_TYPE: "Release"
-  
-      # vcpkg settings (Release only)
+      # vcpkg: prefer Release only
       VCPKG_DEFAULT_TRIPLET: "x64-windows-release"
-      VCPKG_ROOT: "C:\\vcpkg"
+      VCPKG_BUILD_TYPE: "release"
+  
+      # Optional: encourage single-config Release for CMake projects that respect it
+      CMAKE_BUILD_TYPE: "Release"
+      CMAKE_GENERATOR: "Ninja"
   
     steps:
       - name: Checkout
@@ -286,60 +286,53 @@ jobs:
           choco install -y ninja
           ninja --version
   
-      - name: Ensure vcpkg exists
+      - name: Install dependencies (vcpkg, classic mode, Release only)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
   
-          if (-not (Test-Path $env:VCPKG_ROOT)) {
-            throw "Expected vcpkg at $env:VCPKG_ROOT but it does not exist on this runner."
+          if (-not $env:VCPKG_INSTALLATION_ROOT -or $env:VCPKG_INSTALLATION_ROOT.Trim() -eq "") {
+            $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
           }
   
-          $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          Write-Host "Using vcpkg root: $vcpkgRoot"
+  
+          if (-not (Test-Path $vcpkgRoot)) {
+            throw "vcpkg root does not exist: $vcpkgRoot"
+          }
+  
+          $vcpkgExe = Join-Path $vcpkgRoot "vcpkg.exe"
           if (-not (Test-Path $vcpkgExe)) {
-            Push-Location $env:VCPKG_ROOT
+            Write-Host "vcpkg.exe not found, bootstrapping..."
+            Push-Location $vcpkgRoot
             .\bootstrap-vcpkg.bat
             Pop-Location
           }
   
           & $vcpkgExe version
   
-      - name: Install dependencies (vcpkg manifest + local baseline, Release only)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
-      
-          # Determine a valid baseline commit from the local vcpkg checkout (guaranteed to exist)
-          $baseline = (git -C $env:VCPKG_ROOT rev-parse HEAD).Trim()
-          if (-not $baseline) { throw "Failed to determine vcpkg baseline (git rev-parse HEAD returned empty)." }
-          Write-Host "Using vcpkg builtin-baseline: $baseline"
-      
-          @"
-          {
-            "name": "revo-lib-ci",
-            "version-string": "0.0.0",
-            "builtin-baseline": "$baseline",
-            "dependencies": [
-              "ffmpeg",
-              "mbedtls",
-              "speexdsp",
-              "jansson",
-              "uthash",
-              "simde"
-            ]
-          }
-          "@ | Out-File -Encoding utf8 -NoNewline .\vcpkg.json
-      
-          & $vcpkgExe install --triplet $env:VCPKG_DEFAULT_TRIPLET
+          # Release-only triplets (avoid building debug variants)
+          & $vcpkgExe install `
+            ffmpeg:x64-windows-release `
+            mbedtls:x64-windows-release `
+            speexdsp:x64-windows-release `
+            jansson:x64-windows-release `
+            uthash:x64-windows-release `
+            simde:x64-windows-release
   
-      - name: Build (revo-lib) + build.rs builds OBS (Release)
+      - name: Build (revo-lib) + build.rs builds OBS
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
   
-          $env:VCPKG_INSTALLATION_ROOT = $env:VCPKG_ROOT
+          # Point build.rs/CMake to vcpkg toolchain
+          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
           $env:VCPKG_TOOLCHAIN_FILE = Join-Path $env:VCPKG_ROOT "scripts\buildsystems\vcpkg.cmake"
+          $env:VCPKG_DEFAULT_TRIPLET = "x64-windows-release"
+  
+          # IMPORTANT: do NOT force manifests here (it can break classic mode)
+          # $env:VCPKG_FEATURE_FLAGS = "manifests"
   
           cargo build --release
   
