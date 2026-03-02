@@ -258,12 +258,11 @@ jobs:
       RUST_BACKTRACE: "1"
       REVO_OBS_REF: "32.1.0-rc1"
 
-      # Prefer Release everywhere
+      # Force single-config generator so Release is consistent (fix Debug build + Release install mismatch)
+      CMAKE_GENERATOR: "Ninja"
       CMAKE_BUILD_TYPE: "Release"
-      # If CMake respects it in this build
-      CMAKE_MSVC_RUNTIME_LIBRARY: "MultiThreadedDLL"
 
-      # vcpkg settings
+      # vcpkg settings (Release only)
       VCPKG_DEFAULT_TRIPLET: "x64-windows-release"
       VCPKG_ROOT: "C:\\vcpkg"
 
@@ -281,6 +280,13 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Install Ninja
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install -y ninja
+          ninja --version
+
       - name: Ensure vcpkg exists
         shell: pwsh
         run: |
@@ -292,7 +298,6 @@ jobs:
 
           $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
           if (-not (Test-Path $vcpkgExe)) {
-            Write-Host "vcpkg.exe not found, bootstrapping (may download vcpkg-tool)..."
             Push-Location $env:VCPKG_ROOT
             .\bootstrap-vcpkg.bat
             Pop-Location
@@ -306,7 +311,6 @@ jobs:
           $ErrorActionPreference = "Stop"
           $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
 
-          # Force Release triplet to avoid building debug ffmpeg/etc.
           & $vcpkgExe install --triplet $env:VCPKG_DEFAULT_TRIPLET `
             ffmpeg `
             mbedtls `
@@ -320,7 +324,6 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Help CMake find vcpkg toolchain in case build.rs uses CMake under the hood
           $env:VCPKG_INSTALLATION_ROOT = $env:VCPKG_ROOT
           $env:VCPKG_TOOLCHAIN_FILE = Join-Path $env:VCPKG_ROOT "scripts\buildsystems\vcpkg.cmake"
 
@@ -335,14 +338,12 @@ jobs:
           $staging = "libobs-prebuilt-windows-$arch"
           New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
-          # Minimal: pack Rust outputs (you can refine once you know where OBS install lands on Windows)
           New-Item -ItemType Directory -Force -Path "$staging\target-release" | Out-Null
           Copy-Item -Recurse -Force "target\release\*" "$staging\target-release\"
 
           "REVO_OBS_REF=$env:REVO_OBS_REF" | Out-File -Append -Encoding ascii "$staging\build-info.env"
           "BUILD_DATE=$(Get-Date -AsUTC -Format o)" | Out-File -Append -Encoding ascii "$staging\build-info.env"
           "ARCH=$arch" | Out-File -Append -Encoding ascii "$staging\build-info.env"
-          "VCPKG_DEFAULT_TRIPLET=$env:VCPKG_DEFAULT_TRIPLET" | Out-File -Append -Encoding ascii "$staging\build-info.env"
 
           "STAGING=$staging" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
