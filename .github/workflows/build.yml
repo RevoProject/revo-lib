@@ -9,20 +9,57 @@ jobs:
   build:
     runs-on: macos-15-intel
 
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+      CMAKE_OSX_DEPLOYMENT_TARGET: "13.0"
+      RUST_BACKTRACE: "1"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          
+
       - name: Install dependencies
         run: |
           brew update
-          brew install simde ffmpeg mbedtls speexdsp uthash jansson
-          
+          brew install simde ffmpeg mbedtls speexdsp uthash jansson cmake ninja pkg-config
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        
+
+      - name: Build OBS (libobs.framework)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OBS_SRC="obs-libobs/obs-studio"
+          BUILD_DIR="${OBS_SRC}/build-headless"
+
+          test -d "${OBS_SRC}" || (echo "Missing ${OBS_SRC} (submodule?)" && exit 1)
+
+          cmake -S "${OBS_SRC}" -B "${BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="${CMAKE_OSX_DEPLOYMENT_TARGET}" \
+            -DUNIVERSAL=OFF \
+            -DBUILD_BROWSER=OFF \
+            -DBUILD_CAPTIONS=OFF \
+            -DBUILD_VST=OFF \
+            -DENABLE_HEVC=OFF
+
+          cmake --build "${BUILD_DIR}" -j 3
+
+          FW_BIN="$(find "${BUILD_DIR}" -type f -path "*libobs.framework/libobs" -print -quit || true)"
+          if [ -n "${FW_BIN}" ]; then
+            echo "Found libobs binary at: ${FW_BIN}"
+            echo "== LC_BUILD_VERSION =="
+            otool -l "${FW_BIN}" | grep -A2 LC_BUILD_VERSION || true
+          else
+            echo "ERROR: libobs.framework binary not found under ${BUILD_DIR}" >&2
+            find "${BUILD_DIR}" -maxdepth 6 -name "libobs.framework" -print || true
+            exit 1
+          fi
+
       - name: Build
         run: cargo build --release
         env:
@@ -41,12 +78,13 @@ jobs:
           mkdir -p "${STAGING}/bindings"
 
           # ── 1. The compiled macOS framework ─────────────────────────────────
-          FRAMEWORK_SRC="${BUILD_DIR}/libobs/libobs.framework"
-          if [ -d "${FRAMEWORK_SRC}" ]; then
+          FRAMEWORK_SRC="$(find "${BUILD_DIR}" -type d -name "libobs.framework" -print -quit || true)"
+          if [ -n "${FRAMEWORK_SRC}" ] && [ -d "${FRAMEWORK_SRC}" ]; then
             cp -R "${FRAMEWORK_SRC}" "${STAGING}/framework/"
-            echo "Copied libobs.framework"
+            echo "Copied libobs.framework from ${FRAMEWORK_SRC}"
           else
-            echo "ERROR: libobs.framework not found at ${FRAMEWORK_SRC}" >&2
+            echo "ERROR: libobs.framework not found under ${BUILD_DIR}" >&2
+            find "${BUILD_DIR}" -maxdepth 6 -name "libobs.framework" -print || true
             exit 1
           fi
 
@@ -62,7 +100,7 @@ jobs:
           fi
 
           # ── 4. Pre-generated Rust FFI bindings ───────────────────────────────
-          BINDINGS=$(find target -name "libobs_bindings.rs" 2>/dev/null | head -1)
+          BINDINGS=$(find target -name "libobs_bindings.rs" 2>/dev/null | head -1 || true)
           if [ -n "$BINDINGS" ]; then
             cp "$BINDINGS" "${STAGING}/bindings/libobs_bindings.rs"
             echo "Copied libobs_bindings.rs"
@@ -75,11 +113,42 @@ jobs:
           echo "OBS_REF=$(git -C ${OBS_SRC} describe --tags --always 2>/dev/null || echo unknown)" >> "${STAGING}/build-info.env"
           echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${STAGING}/build-info.env"
           echo "ARCH=${ARCH}"                                >> "${STAGING}/build-info.env"
+          echo "MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}" >> "${STAGING}/build-info.env"
 
           echo "Artifact layout:"
           find "${STAGING}" -not -name '*.h' | sort
 
           echo "STAGING=${STAGING}" >> "$GITHUB_ENV"
+
+      - name: Patch framework install names (make artifact portable)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FW_BIN="${STAGING}/framework/libobs.framework/libobs"
+          if [ ! -f "${FW_BIN}" ]; then
+            echo "ERROR: framework binary not found: ${FW_BIN}" >&2
+            find "${STAGING}/framework" -maxdepth 4 -print || true
+            exit 1
+          fi
+
+          echo "Before patch:"
+          otool -D "${FW_BIN}" || true
+          otool -L "${FW_BIN}" || true
+
+          install_name_tool -id "@rpath/libobs.framework/libobs" "${FW_BIN}"
+
+          ABS_REF="$(otool -L "${FW_BIN}" | awk '{print $1}' | grep -E '^/.*libobs\.framework/libobs$' | head -n 1 || true)"
+          if [ -n "${ABS_REF}" ]; then
+            echo "Patching absolute ref: ${ABS_REF}"
+            install_name_tool -change "${ABS_REF}" "@rpath/libobs.framework/libobs" "${FW_BIN}"
+          fi
+
+          codesign --force --sign - "${STAGING}/framework/libobs.framework" || true
+
+          echo "After patch:"
+          otool -D "${FW_BIN}" || true
+          otool -L "${FW_BIN}" || true
 
       - name: Upload libobs prebuilt artifact
         uses: actions/upload-artifact@v4
