@@ -13,6 +13,8 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: "13.0"
       CMAKE_OSX_DEPLOYMENT_TARGET: "13.0"
       RUST_BACKTRACE: "1"
+      # build.rs używa tego jako ref (domyślnie 32.1.0-rc1 jeśli brak)
+      REVO_OBS_REF: "32.1.0-rc1"
 
     steps:
       - name: Checkout
@@ -20,127 +22,88 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Debug checkout tree + build.rs expectations
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "=== Repo root ==="
-          ls -la
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-          echo "=== .gitmodules (if any) ==="
-          if [ -f .gitmodules ]; then
-            cat .gitmodules
-          else
-            echo "No .gitmodules"
-          fi
-
-          echo "=== Submodules status ==="
-          git submodule status --recursive || true
-
-          echo "=== build.rs files ==="
-          find . -maxdepth 6 -name build.rs -print || true
-
-          echo "=== env vars referenced by build.rs ==="
-          rg -n 'env::var\("([^"]+)"\)|std::env::var\("([^"]+)"\)' -S . || true
-
+      # Zależności: build.rs i tak próbuje brew install, ale robimy to tu, żeby log był czytelniejszy
       - name: Install dependencies
         run: |
           brew update
           brew install simde ffmpeg mbedtls speexdsp uthash jansson cmake ninja pkg-config
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build OBS (libobs.framework)
+      # Najważniejsze: to wywołuje build.rs, który:
+      # - klonuje obs-studio do obs-libobs/obs-studio (jeśli brak)
+      # - buduje w obs-libobs/obs-studio/build-headless
+      # - instaluje do obs-libobs/obs-studio/build-headless/install
+      # - generuje bindings do OUT_DIR (target/**/out/libobs_bindings.rs)
+      - name: Build (revo-lib) + build.rs builds OBS
         shell: bash
         run: |
           set -euo pipefail
+          cargo build --release
+
+      - name: Package prebuilt libobs artifact (layout compatible with REVO_PREBUILT_LIBOBS_DIR)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ARCH=$(uname -m)
+          STAGING="libobs-prebuilt-macos-${ARCH}"
 
           OBS_SRC="obs-libobs/obs-studio"
           BUILD_DIR="${OBS_SRC}/build-headless"
-
-          test -d "${OBS_SRC}" || (echo "Missing ${OBS_SRC} (submodule?)" && exit 1)
-
-          cmake -S "${OBS_SRC}" -B "${BUILD_DIR}" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET="${CMAKE_OSX_DEPLOYMENT_TARGET}" \
-            -DUNIVERSAL=OFF \
-            -DBUILD_BROWSER=OFF \
-            -DBUILD_CAPTIONS=OFF \
-            -DBUILD_VST=OFF \
-            -DENABLE_HEVC=OFF
-
-          cmake --build "${BUILD_DIR}" -j 3
-
-          FW_BIN="$(find "${BUILD_DIR}" -type f -path "*libobs.framework/libobs" -print -quit || true)"
-          if [ -n "${FW_BIN}" ]; then
-            echo "Found libobs binary at: ${FW_BIN}"
-            echo "== LC_BUILD_VERSION =="
-            otool -l "${FW_BIN}" | grep -A2 LC_BUILD_VERSION || true
-          else
-            echo "ERROR: libobs.framework binary not found under ${BUILD_DIR}" >&2
-            find "${BUILD_DIR}" -maxdepth 6 -name "libobs.framework" -print || true
-            exit 1
-          fi
-
-      - name: Copy libobs.framework into ./framework
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf framework
-          mkdir -p framework
-          cp -R "$(find obs-libobs/obs-studio/build-headless -type d -name libobs.framework -print -quit)" framework/
-          ls -la framework/libobs.framework
-          echo "Framework binary:"
-          ls -la framework/libobs.framework/libobs || true
-
-      - name: Build (revo-lib)
-        run: cargo build --release
-        env:
-          RUST_BACKTRACE: 1
-
-      - name: Package libobs prebuilt artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          ARCH=$(uname -m)
-          STAGING="libobs-prebuilt-macos-${ARCH}"
-          BUILD_DIR="obs-libobs/obs-studio/build-headless"
-          OBS_SRC="obs-libobs/obs-studio"
+          INSTALL_PREFIX="${BUILD_DIR}/install"
 
           mkdir -p "${STAGING}/framework"
           mkdir -p "${STAGING}/include/obs"
           mkdir -p "${STAGING}/bindings"
 
-          FRAMEWORK_SRC="$(find "${BUILD_DIR}" -type d -name "libobs.framework" -print -quit || true)"
-          if [ -n "${FRAMEWORK_SRC}" ] && [ -d "${FRAMEWORK_SRC}" ]; then
-            cp -R "${FRAMEWORK_SRC}" "${STAGING}/framework/"
-            echo "Copied libobs.framework from ${FRAMEWORK_SRC}"
-          else
+          # 1) Framework
+          # OBS build should have produced libobs.framework somewhere under BUILD_DIR.
+          # build.rs (prebuilt mode) expects framework named "obs" (framework=obs).
+          FW_DIR="$(find "${BUILD_DIR}" -type d -name "libobs.framework" -print -quit || true)"
+          if [ -z "${FW_DIR}" ]; then
             echo "ERROR: libobs.framework not found under ${BUILD_DIR}" >&2
-            find "${BUILD_DIR}" -maxdepth 6 -name "libobs.framework" -print || true
+            find "${BUILD_DIR}" -maxdepth 8 -name "*.framework" -print || true
             exit 1
           fi
 
+          # Copy as obs.framework to match build.rs prebuilt link name (framework=obs)
+          rm -rf "${STAGING}/framework/obs.framework"
+          cp -R "${FW_DIR}" "${STAGING}/framework/obs.framework"
+          echo "Copied framework: ${FW_DIR} -> ${STAGING}/framework/obs.framework"
+
+          # 2) Headers
+          # build.rs expects <prebuilt>/include/ ... public headers
+          # We'll include both installed headers (preferred) and fallback source headers.
+          if [ -d "${INSTALL_PREFIX}/include/obs" ]; then
+            cp -R "${INSTALL_PREFIX}/include/obs/." "${STAGING}/include/obs/"
+            echo "Copied installed headers from ${INSTALL_PREFIX}/include/obs"
+          fi
           cp "${OBS_SRC}/libobs/"*.h "${STAGING}/include/obs/" 2>/dev/null || true
 
+          # obsconfig.h
           if [ -f "${BUILD_DIR}/config/obsconfig.h" ]; then
             cp "${BUILD_DIR}/config/obsconfig.h" "${STAGING}/include/obs/"
             echo "Copied obsconfig.h"
           else
-            echo "WARNING: obsconfig.h not found" >&2
+            echo "WARNING: obsconfig.h not found at ${BUILD_DIR}/config/obsconfig.h" >&2
           fi
 
-          BINDINGS=$(find target -name "libobs_bindings.rs" 2>/dev/null | head -1 || true)
-          if [ -n "$BINDINGS" ]; then
-            cp "$BINDINGS" "${STAGING}/bindings/libobs_bindings.rs"
-            echo "Copied libobs_bindings.rs"
-          else
-            echo "ERROR: libobs_bindings.rs not found in target/" >&2
+          # 3) Bindings (pre-generated)
+          # build.rs in prebuilt mode requires: bindings/libobs_bindings.rs
+          BINDINGS="$(find target -path "*/out/libobs_bindings.rs" -print -quit || true)"
+          if [ -z "${BINDINGS}" ]; then
+            echo "ERROR: libobs_bindings.rs not found in target/**/out/" >&2
+            find target -maxdepth 6 -name "libobs_bindings.rs" -print || true
             exit 1
           fi
+          cp "${BINDINGS}" "${STAGING}/bindings/libobs_bindings.rs"
+          echo "Copied bindings from ${BINDINGS}"
 
-          echo "OBS_REF=$(git -C ${OBS_SRC} describe --tags --always 2>/dev/null || echo unknown)" >> "${STAGING}/build-info.env"
+          # 4) Metadata
+          echo "REVO_OBS_REF=${REVO_OBS_REF}" >> "${STAGING}/build-info.env"
+          echo "OBS_GIT=$(git -C ${OBS_SRC} describe --tags --always 2>/dev/null || echo unknown)" >> "${STAGING}/build-info.env"
           echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${STAGING}/build-info.env"
           echo "ARCH=${ARCH}" >> "${STAGING}/build-info.env"
           echo "MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}" >> "${STAGING}/build-info.env"
@@ -150,22 +113,12 @@ jobs:
 
           echo "STAGING=${STAGING}" >> "$GITHUB_ENV"
 
-      - name: Ensure STAGING is set
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${{ env.STAGING }}" ]; then
-            echo "ERROR: env.STAGING is empty (previous step did not export it)" >&2
-            exit 1
-          fi
-          echo "STAGING=${{ env.STAGING }}"
-
       - name: Patch framework install names (make artifact portable)
         shell: bash
         run: |
           set -euo pipefail
 
-          FW_BIN="${{ env.STAGING }}/framework/libobs.framework/libobs"
+          FW_BIN="${{ env.STAGING }}/framework/obs.framework/obs"
           if [ ! -f "${FW_BIN}" ]; then
             echo "ERROR: framework binary not found: ${FW_BIN}" >&2
             find "${{ env.STAGING }}/framework" -maxdepth 4 -print || true
@@ -176,19 +129,18 @@ jobs:
           otool -D "${FW_BIN}" || true
           otool -L "${FW_BIN}" || true
 
-          install_name_tool -id "@rpath/libobs.framework/libobs" "${FW_BIN}"
+          # Make it @rpath-friendly
+          install_name_tool -id "@rpath/obs.framework/obs" "${FW_BIN}"
 
-          ABS_REF="$(otool -L "${FW_BIN}" | awk '{print $1}' | grep -E '^/.*libobs\.framework/libobs$' | head -n 1 || true)"
-          if [ -n "${ABS_REF}" ]; then
-            echo "Patching absolute ref: ${ABS_REF}"
-            install_name_tool -change "${ABS_REF}" "@rpath/libobs.framework/libobs" "${FW_BIN}"
-          fi
-
-          codesign --force --sign - "${{ env.STAGING }}/framework/libobs.framework" || true
+          # Ad-hoc codesign after modifications
+          codesign --force --sign - "${{ env.STAGING }}/framework/obs.framework" || true
 
           echo "After patch:"
           otool -D "${FW_BIN}" || true
           otool -L "${FW_BIN}" || true
+
+          echo "== LC_BUILD_VERSION =="
+          otool -l "${FW_BIN}" | grep -A2 LC_BUILD_VERSION || true
 
       - name: Upload libobs prebuilt artifact
         uses: actions/upload-artifact@v4
