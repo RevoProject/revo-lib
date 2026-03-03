@@ -327,6 +327,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         cmake.arg("-G").arg("Ninja");
         cmake.arg(format!("-DCMAKE_SYSTEM_VERSION={sdk_ver}"));
         cmake.arg(format!("-DCMAKE_INSTALL_PREFIX={}", install_prefix.display()));
+        // /DEBUG:FASTLINK tells the MSVC linker to actually write .pdb files.
+        // Without /DEBUG, MSVC ignores /pdb: on the link line, so the post-build
+        // cmake step that copies w32-pthreads.pdb (and obs.pdb) fails with
+        // "Error copying file … .pdb".
+        cmake.arg("-DCMAKE_SHARED_LINKER_FLAGS=/DEBUG:FASTLINK");
+        cmake.arg("-DCMAKE_EXE_LINKER_FLAGS=/DEBUG:FASTLINK");
 
         // vcpkg integration
         if let Ok(vcpkg_root) = env::var("VCPKG_ROOT") {
