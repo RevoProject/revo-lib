@@ -481,12 +481,25 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // On Windows, MSVC's bundled Clang 19 headers have a type-mismatch in
     // mmintrin.h (__m64 vs int) that causes bindgen to fail.  We don't need
-    // MMX/SSE intrinsic definitions in the Rust bindings, so blocklist the
-    // offending headers and set the correct target triple.
+    // MMX/SSE intrinsic definitions in the Rust bindings, so:
+    //  1. Pre-define the include-guards so clang's preprocessor skips the
+    //     file bodies entirely (blocklist_file only suppresses *output*,
+    //     not parsing, so clang still errors without the guards).
+    //  2. Set the correct target triple so MSVC ABI rules apply.
     if cfg!(target_os = "windows") {
         bindgen_builder = bindgen_builder
             .clang_arg("--target=x86_64-pc-windows-msvc")
-            // MSVC intrinsic headers with __m64 <-> int mismatches:
+            // Pre-define include guards for clang 19's intrinsic headers that
+            // contain __m64 <-> int mismatches under Clang's strict semantics:
+            .clang_arg("-D__MMINTRIN_H")
+            .clang_arg("-D__XMMINTRIN_H")
+            .clang_arg("-D__EMMINTRIN_H")
+            .clang_arg("-D__PMMINTRIN_H")
+            .clang_arg("-D__TMMINTRIN_H")
+            .clang_arg("-D__SMMINTRIN_H")
+            .clang_arg("-D__NMMINTRIN_H")
+            .clang_arg("-D__IMMINTRIN_H")
+            // Also blocklist so no accidental items slip through if guards change:
             .blocklist_file(".*mmintrin.*")
             .blocklist_file(".*intrin.*");
     }
