@@ -339,6 +339,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("cargo:warning=libobs-d3d11/CMakeLists.txt not found, skipping");
         }
 
+        // Same fix for libobs-winrt which also uses set_target_properties LINK_FLAGS.
+        println!("cargo:warning=Step: patch libobs-winrt/CMakeLists.txt to force /DEBUG:FASTLINK");
+        let winrt_cmake = obs_src.join("libobs-winrt/CMakeLists.txt");
+        if winrt_cmake.exists() {
+            let content = fs::read_to_string(&winrt_cmake)?;
+            if !content.contains("PATCHED: /DEBUG:FASTLINK") {
+                let patched = content + "\n# PATCHED: /DEBUG:FASTLINK so the linker writes libobs-winrt.pdb\nif(MSVC)\n  set_property(TARGET libobs-winrt APPEND_STRING PROPERTY LINK_FLAGS \" /DEBUG:FASTLINK\")\nendif()\n";
+                fs::write(&winrt_cmake, patched)?;
+                println!("cargo:warning=Patched libobs-winrt/CMakeLists.txt");
+            }
+        } else {
+            println!("cargo:warning=libobs-winrt/CMakeLists.txt not found, skipping");
+        }
+
         // Windows SDK version: prefer CMAKE_SYSTEM_VERSION env var (set by workflow)
         let sdk_ver = env::var("CMAKE_SYSTEM_VERSION")
             .unwrap_or_else(|_| "10.0.20348.0".to_string());
