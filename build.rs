@@ -362,10 +362,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     // IMPORTANT LINE
     run(cmake.current_dir(&build_dir), "cmake configure")?;
 
-    // 4) Build only libobs target
+    // 4) Build default (all) targets.
+    // Don't restrict to --target libobs: cmake install also installs libobs-d3d11
+    // on Windows, so that target must be built too. The headless cmake config
+    // already disables plugins/frontend, so "all" is just libobs + libobs-d3d11
+    // + w32-pthreads + libcaption.
     let mut build_cmd = Command::new("cmake");
     build_cmd.arg("--build").arg(".");
-    build_cmd.arg("--target").arg("libobs");
     // Ninja/VS: parallel ok
     build_cmd.arg("--parallel").arg(nproc());
     // Pass -- -v so Ninja prints each compile/link command, making errors visible.
