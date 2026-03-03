@@ -22,6 +22,28 @@ fn run(cmd: &mut Command, step: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Like `run`, but retries up to `attempts` times on failure (useful for
+/// transient network errors such as GitHub returning HTTP 500 during git clone).
+fn run_with_retry(
+    build_cmd: &dyn Fn() -> Command,
+    step: &str,
+    attempts: u32,
+) -> Result<(), Box<dyn Error>> {
+    let mut last_err: Box<dyn Error> = "no attempts made".into();
+    for attempt in 1..=attempts {
+        if attempt > 1 {
+            println!("cargo:warning={step}: retry {attempt}/{attempts} after transient failure");
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        }
+        let mut cmd = build_cmd();
+        match run(&mut cmd, step) {
+            Ok(()) => return Ok(()),
+            Err(e) => last_err = e,
+        }
+    }
+    Err(last_err)
+}
+
 fn nproc() -> String {
     std::thread::available_parallelism()
         .map(|n| n.get().to_string())
@@ -88,12 +110,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     // 1) Fetch obs-studio source into revo-lib/obs-libobs
     if !obs_src.exists() {
         fs::create_dir_all(&obs_root)?;
-        run(
-            Command::new("git")
-                .arg("clone")
-                .arg("https://github.com/obsproject/obs-studio.git")
-                .arg(&obs_src),
+        let obs_src_clone = obs_src.clone();
+        run_with_retry(
+            &|| {
+                let mut cmd = Command::new("git");
+                cmd.arg("clone")
+                    .arg("https://github.com/obsproject/obs-studio.git")
+                    .arg(&obs_src_clone);
+                cmd
+            },
             "git clone obs-studio",
+            3,
         )?;
     }
 
