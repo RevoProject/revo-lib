@@ -345,13 +345,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // 4) Build only libobs target
     let mut build_cmd = Command::new("cmake");
-    build_cmd
-        .arg("--build")
-        .arg(".")
-        .arg("--target").arg("libobs")
-        .arg("--parallel")
-        .arg(nproc())
-        .current_dir(&build_dir);
+    build_cmd.arg("--build").arg(".");
+    
+    if !(cfg!(target_os = "windows")) {
+        build_cmd.arg("--target").arg("libobs");
+    }
+    
+    // Ninja/VS: parallel ok
+    build_cmd.arg("--parallel").arg(nproc()).current_dir(&build_dir);
     
     run(&mut build_cmd, "cmake build")?;
 
