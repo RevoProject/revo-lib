@@ -319,6 +319,26 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("cargo:warning=windows/architecture.cmake not found, skipping");
         }
 
+        // Patch libobs-d3d11/CMakeLists.txt to ensure /DEBUG:FASTLINK reaches the linker.
+        //
+        // OBS's libobs-d3d11 cmake uses set_target_properties(...LINK_FLAGS "/machine:x64")
+        // which REPLACES (not appends to) CMAKE_SHARED_LINKER_FLAGS, so our global
+        // /DEBUG:FASTLINK flag is lost.  Without it the linker never writes
+        // libobs-d3d11.pdb, causing the cmake post-build copy step to fail.
+        // Using set_property(APPEND_STRING) preserves whatever OBS already set.
+        println!("cargo:warning=Step: patch libobs-d3d11/CMakeLists.txt to force /DEBUG:FASTLINK");
+        let d3d11_cmake = obs_src.join("libobs-d3d11/CMakeLists.txt");
+        if d3d11_cmake.exists() {
+            let content = fs::read_to_string(&d3d11_cmake)?;
+            if !content.contains("PATCHED: /DEBUG:FASTLINK") {
+                let patched = content + "\n# PATCHED: /DEBUG:FASTLINK so the linker writes libobs-d3d11.pdb\nif(MSVC)\n  set_property(TARGET libobs-d3d11 APPEND_STRING PROPERTY LINK_FLAGS \" /DEBUG:FASTLINK\")\nendif()\n";
+                fs::write(&d3d11_cmake, patched)?;
+                println!("cargo:warning=Patched libobs-d3d11/CMakeLists.txt");
+            }
+        } else {
+            println!("cargo:warning=libobs-d3d11/CMakeLists.txt not found, skipping");
+        }
+
         // Windows SDK version: prefer CMAKE_SYSTEM_VERSION env var (set by workflow)
         let sdk_ver = env::var("CMAKE_SYSTEM_VERSION")
             .unwrap_or_else(|_| "10.0.20348.0".to_string());
