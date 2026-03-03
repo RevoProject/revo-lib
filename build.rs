@@ -333,6 +333,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         // "Error copying file … .pdb".
         cmake.arg("-DCMAKE_SHARED_LINKER_FLAGS=/DEBUG:FASTLINK");
         cmake.arg("-DCMAKE_EXE_LINKER_FLAGS=/DEBUG:FASTLINK");
+        // The Visual Studio generator adds UNICODE, _UNICODE, and NOMINMAX to
+        // every project by default.  Ninja does not.  Without them:
+        //   - NOMINMAX: Windows.h defines min/max macros that break
+        //     std::numeric_limits<T>::max() in d3d11-subsystem.cpp (C2589/C2059).
+        //   - UNICODE/_UNICODE: Win32 APIs resolve to the A (ANSI) variants,
+        //     making DXGI/D3D struct char fields mismatch wchar_t parameters
+        //     in d3d11-subsystem.cpp (C2664).
+        cmake.arg("-DCMAKE_CXX_FLAGS=/DNOMINMAX /DUNICODE /D_UNICODE");
+        cmake.arg("-DCMAKE_C_FLAGS=/DUNICODE /D_UNICODE");
 
         // vcpkg integration
         if let Ok(vcpkg_root) = env::var("VCPKG_ROOT") {
