@@ -9,8 +9,13 @@ const DEFAULT_OBS_REF: &str = "32.1.0-rc1";
 fn run(cmd: &mut Command, step: &str) -> Result<(), Box<dyn Error>> {
     println!("cargo:warning=Running step: {step}");
     let output = cmd.output()?;
-    println!("cargo:warning=stdout: {}", String::from_utf8_lossy(&output.stdout));
-    eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+    // Print both stdout and stderr as cargo warnings so output is visible in CI.
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        println!("cargo:warning=[{step}] stdout: {line}");
+    }
+    for line in String::from_utf8_lossy(&output.stderr).lines() {
+        println!("cargo:warning=[{step}] stderr: {line}");
+    }
     if !output.status.success() {
         return Err(format!("step failed: {step}").into());
     }
@@ -356,7 +361,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     build_cmd.arg("--build").arg(".");
     build_cmd.arg("--target").arg("libobs");
     // Ninja/VS: parallel ok
-    build_cmd.arg("--parallel").arg(nproc()).current_dir(&build_dir);
+    build_cmd.arg("--parallel").arg(nproc());
+    // Pass -- -v so Ninja prints each compile/link command, making errors visible.
+    build_cmd.arg("--").arg("-v");
+    build_cmd.current_dir(&build_dir);
     
     run(&mut build_cmd, "cmake build")?;
 
