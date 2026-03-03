@@ -505,7 +505,7 @@ typedef struct __declspec(align(64)) { unsigned char b[64]; } __m512;
 typedef struct __declspec(align(64)) { unsigned char b[64]; } __m512d;
 typedef struct __declspec(align(64)) { unsigned char b[64]; } __m512i;
 
-/* Block every SIMD/intrinsic header – their bodies are not needed for bindgen */
+/* Block every SIMD/intrinsic header - their bodies are not needed for bindgen */
 #define __MMINTRIN_H
 #define __XMMINTRIN_H
 #define __EMMINTRIN_H
