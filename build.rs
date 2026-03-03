@@ -300,7 +300,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                  if(NOT DEFINED OBS_PARENT_ARCHITECTURE)\n\
                    set(OBS_PARENT_ARCHITECTURE \"x64\")\n\
                  endif()\n\
-                 message(STATUS \"OBS_PARENT_ARCHITECTURE=${OBS_PARENT_ARCHITECTURE}\")\n",
+                 # With Ninja, CMAKE_VS_PLATFORM_NAME is empty.  The root\n\
+                 # CMakeLists.txt guards all add_subdirectory() calls with\n\
+                 #   if(NOT OBS_PARENT_ARCHITECTURE STREQUAL CMAKE_VS_PLATFORM_NAME) return() endif()\n\
+                 # so we must make them match, otherwise nothing is compiled.\n\
+                 if(NOT DEFINED CMAKE_VS_PLATFORM_NAME OR CMAKE_VS_PLATFORM_NAME STREQUAL \"\")\n\
+                   set(CMAKE_VS_PLATFORM_NAME \"${OBS_PARENT_ARCHITECTURE}\" CACHE STRING \"\" FORCE)\n\
+                 endif()\n\
+                 message(STATUS \"OBS_PARENT_ARCHITECTURE=${OBS_PARENT_ARCHITECTURE}\")\n\
+                 message(STATUS \"CMAKE_VS_PLATFORM_NAME=${CMAKE_VS_PLATFORM_NAME}\")\n",
             )?;
         } else {
             println!("cargo:warning=windows/architecture.cmake not found, skipping");
@@ -346,11 +354,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // 4) Build only libobs target
     let mut build_cmd = Command::new("cmake");
     build_cmd.arg("--build").arg(".");
-    
-    if !(cfg!(target_os = "windows")) {
-        build_cmd.arg("--target").arg("libobs");
-    }
-    
+    build_cmd.arg("--target").arg("libobs");
     // Ninja/VS: parallel ok
     build_cmd.arg("--parallel").arg(nproc()).current_dir(&build_dir);
     
@@ -371,7 +375,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // 6) Generate Rust FFI bindings
     let wrapper = manifest_dir.join("src/ffi/wrapper.h");
-    let bindings = bindgen::Builder::default()
+    let mut bindgen_builder = bindgen::Builder::default()
         .header(wrapper.to_string_lossy())
         .clang_arg(format!("-I{}", install_prefix.join("include").display()))
         .clang_arg(format!("-I{}", install_prefix.join("include/obs").display()))
@@ -386,7 +390,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         .allowlist_type("gs_.*")
         .allowlist_type("__va_list_tag")
         .allowlist_var("OBS_.*")
-        .allowlist_var("LOG_.*")
+        .allowlist_var("LOG_.*");
+
+    // On Windows, MSVC's bundled Clang 19 headers have a type-mismatch in
+    // mmintrin.h (__m64 vs int) that causes bindgen to fail.  We don't need
+    // MMX/SSE intrinsic definitions in the Rust bindings, so blocklist the
+    // offending headers and set the correct target triple.
+    if cfg!(target_os = "windows") {
+        bindgen_builder = bindgen_builder
+            .clang_arg("--target=x86_64-pc-windows-msvc")
+            // MSVC intrinsic headers with __m64 <-> int mismatches:
+            .blocklist_file(".*mmintrin.*")
+            .blocklist_file(".*intrin.*");
+    }
+
+    let bindings = bindgen_builder
         .generate()
         .map_err(|_| "bindgen failed")?;
 
