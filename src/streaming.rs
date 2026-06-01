@@ -1,43 +1,39 @@
-use crate::error::{RevoLibError, RevoLibResult};
-use crate::obs;
-use crate::runtime;
+use libobs_wrapper::data::output::ObsOutputRef;
 
-#[derive(Clone, Copy)]
+use crate::error::RevoLibResult;
+use crate::output::OutputWrapper;
+
+/// Wrapper around libobs-wrapper StreamingOutput for backward compatibility
+#[derive(Clone)]
 pub struct StreamingOutput {
-    ptr: *mut obs::obs_output,
+    output: OutputWrapper,
 }
 
 impl StreamingOutput {
-    pub fn from_raw(ptr: *mut obs::obs_output) -> RevoLibResult<Self> {
-        if ptr.is_null() {
-            return Err(RevoLibError::NullPointer("stream output"));
-        }
-        Ok(Self { ptr })
+    /// Create from a raw ObsOutputRef
+    pub fn from_raw(output: ObsOutputRef) -> RevoLibResult<Self> {
+        Ok(Self {
+            output: OutputWrapper::new(output, "streaming"),
+        })
     }
 
-    pub fn as_raw(&self) -> *mut obs::obs_output {
-        self.ptr
+    /// Get reference to the underlying output
+    pub fn as_raw(&self) -> ObsOutputRef {
+        self.output.as_raw()
     }
 
+    /// Start streaming
     pub fn start(&self) -> RevoLibResult<()> {
-        if !runtime::is_initialized() {
-            return Err(RevoLibError::ObsNotInitialized);
-        }
-        let started = unsafe { obs::obs_output_start(self.ptr) };
-        if started {
-            Ok(())
-        } else {
-            Err(RevoLibError::Other("failed to start stream output".to_string()))
-        }
+        self.output.start()
     }
 
+    /// Stop streaming
     pub fn stop(&self) {
-        unsafe {
-            obs::obs_output_stop(self.ptr);
-        }
+        self.output.stop();
     }
 
+    /// Check if streaming is active
     pub fn active(&self) -> bool {
-        unsafe { obs::obs_output_active(self.ptr) }
+        self.output.active()
     }
 }

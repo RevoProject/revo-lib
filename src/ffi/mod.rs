@@ -2,4 +2,5 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_snake_case)]
 
-include!(concat!(env!("OUT_DIR"), "/libobs_bindings.rs"));
+// Re-export public types from libobs-wrapper for backward compatibility
+pub use libobs_wrapper::*;

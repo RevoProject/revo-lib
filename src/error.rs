@@ -29,4 +29,10 @@ impl From<NulError> for RevoLibError {
     }
 }
 
+impl From<libobs_wrapper::utils::ObsError> for RevoLibError {
+    fn from(err: libobs_wrapper::utils::ObsError) -> Self {
+        Self::Other(format!("{:?}", err))
+    }
+}
+
 pub type RevoLibResult<T> = Result<T, RevoLibError>;

@@ -2,11 +2,6 @@
 name = "revo-lib"
 version = "0.1.0"
 edition = "2021"
-build = "build.rs"
 
 [dependencies]
-libc = "0.2"
-
-[build-dependencies]
-bindgen = "0.72.1"
-walkdir = "2"
+libobs-wrapper = { git = "https://github.com/libobs-rs/libobs-rs", branch = "main" }

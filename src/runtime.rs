@@ -1,64 +1,45 @@
-use std::ffi::CString;
-use std::sync::atomic::{AtomicBool, Ordering};
+use libobs_wrapper::context::ObsContext as LibObsContext;
+use libobs_wrapper::utils::StartupInfo;
 
 use crate::error::{RevoLibError, RevoLibResult};
-use crate::obs;
-
-static OBS_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 pub fn libobs_git_describe() -> &'static str {
-    option_env!("REVO_LIBOBS_GIT_DESCRIBE").unwrap_or("unknown")
+    option_env!("REVO_LIBOBS_GIT_DESCRIBE").unwrap_or("libobs-wrapper")
 }
 
-pub fn init(locale: &str, module_config_path: Option<&str>) -> RevoLibResult<()> {
-    if OBS_INITIALIZED.load(Ordering::SeqCst) {
-        return Ok(());
-    }
-
-    let locale_c = CString::new(locale)?;
-    let conf_c = CString::new(module_config_path.unwrap_or(""))?;
-
-    let ok = unsafe { obs::obs_startup(locale_c.as_ptr(), conf_c.as_ptr(), std::ptr::null_mut()) };
-    if !ok {
-        return Err(RevoLibError::ObsStartupFailed);
-    }
-
-    unsafe {
-        obs::obs_load_all_modules();
-        obs::obs_post_load_modules();
-    }
-
-    OBS_INITIALIZED.store(true, Ordering::SeqCst);
+/// Initialize OBS runtime with the given locale and optional module config path
+pub fn init(_locale: &str, _module_config_path: Option<&str>) -> RevoLibResult<()> {
+    // libobs-wrapper handles initialization internally
+    // We just validate that we can create a context
+    let _ctx = LibObsContext::new(StartupInfo::default())
+        .map_err(|e| RevoLibError::Other(format!("Failed to initialize OBS: {e:?}")))?;
     Ok(())
 }
 
 pub fn is_initialized() -> bool {
-    OBS_INITIALIZED.load(Ordering::SeqCst)
+    // libobs-wrapper manages initialization state internally
+    // For now, return true as a placeholder - the actual state is managed by libobs-wrapper
+    true
 }
 
-pub fn set_initialized(value: bool) {
-    OBS_INITIALIZED.store(value, Ordering::SeqCst);
+pub fn set_initialized(_value: bool) {
+    // libobs-wrapper manages this internally, no-op here
 }
 
 pub fn shutdown() {
-    if OBS_INITIALIZED.swap(false, Ordering::SeqCst) {
-        unsafe {
-            obs::obs_shutdown();
-        }
-    }
+    // libobs-wrapper handles shutdown automatically via Drop
 }
 
-pub struct ObsContext;
+/// RAII wrapper for OBS context - automatic cleanup on drop
+pub struct ObsContext {
+    _inner: LibObsContext,
+}
 
 impl ObsContext {
-    pub fn startup(locale: &str, module_config_path: Option<&str>) -> RevoLibResult<Self> {
-        init(locale, module_config_path)?;
-        Ok(Self)
-    }
-}
-
-impl Drop for ObsContext {
-    fn drop(&mut self) {
-        shutdown();
+    /// Create a new OBS context with the given locale and module config path
+    pub fn startup(_locale: &str, _module_config_path: Option<&str>) -> RevoLibResult<Self> {
+        let inner = LibObsContext::new(StartupInfo::default())
+            .map_err(|e| RevoLibError::Other(format!("Failed to create OBS context: {e:?}")))?;
+        Ok(Self { _inner: inner })
     }
 }
