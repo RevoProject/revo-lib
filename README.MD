@@ -25,6 +25,56 @@ Add to your Cargo.toml:
 revo-lib = { git = "https://github.com/revoproject/revo-lib" }
 ```
 
+## ▶ Run with revo-ui (second folder)
+
+If `revo-ui` is a sibling of this folder, use a local path dependency first.
+
+### 1) Folder layout
+
+```text
+revo-rust/
+├── revo-lib/
+└── revo-ui/
+```
+
+### 2) Add local dependency in revo-ui
+
+In `revo-ui/Cargo.toml`:
+
+```toml
+[dependencies]
+revo-lib = { path = "../revo-lib" }
+```
+
+If `revo-ui` is Tauri, update `revo-ui/src-tauri/Cargo.toml` instead.
+
+### 3) Minimal runtime init in revo-ui
+
+```rust
+use revo_lib::runtime::ObsContext;
+
+fn main() {
+    let _obs = ObsContext::startup("en-US", None).expect("failed to init OBS");
+    // run revo-ui app here
+}
+```
+
+### 4) Build and run from revo-ui
+
+```bash
+cd ../revo-ui
+cargo run
+```
+
+### 5) Optional: switch to git dependency later
+
+After local testing:
+
+```toml
+[dependencies]
+revo-lib = { git = "https://github.com/revoproject/revo-lib" }
+```
+
 ## 📋 Migration Summary
 
 ### What Changed
@@ -53,6 +103,21 @@ revo-lib = { git = "https://github.com/revoproject/revo-lib" }
 - ✅ Trait-based polymorphic outputs (`ObsOutputTrait`)
 - ✅ DRY principle (unified output handling)
 - ✅ Thread-safe context with automatic cleanup (RAII)
+
+```text
+======================== CHANGE SUMMARY ========================
+    [raw libobs FFI]  --->  [libobs-wrapper]
+                 |                     |
+                 |                     +-- safe bindings
+                 |                     +-- RAII context
+                 |                     +-- shared output wrapper
+                 |
+                 +-- removed:
+                         - bindgen build step
+                         - obs-studio local source tree
+                         - duplicated streaming / recording code
+================================================================
+```
 
 ## 📦 Dependencies
 

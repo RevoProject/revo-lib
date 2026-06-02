@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 libobs-wrapper = { git = "https://github.com/libobs-rs/libobs-rs", branch = "main" }
+libobs-bootstrapper = { git = "https://github.com/libobs-rs/libobs-rs", branch = "main" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
